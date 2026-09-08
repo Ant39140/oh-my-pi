@@ -214,6 +214,71 @@ conversation; `/new`, which creates a new session identity and transcript file;
 and `/drop`, which attempts to delete the old persisted session before starting
 a new one.
 
+## BTW history
+
+`/btw <question>` asks an independent side question using the current session
+context. Bare `/btw` opens this session's history, with the newest question selected.
+Saved side questions are not appended to the main transcript or sent as history
+to unrelated turns. Each new `/btw <question>` remains independent; explicit
+follow-ups include only the selected side conversation alongside the current
+main-session context.
+
+Previous questions and answers are replayed as separate `user` and `assistant`
+messages, followed by the new user question, rather than embedded in one prompt.
+The original question template stays in the same position across follow-ups.
+History is snapshotted before asynchronous conversion and uses the normal
+provider normalization and secret-obfuscation pipeline.
+
+The main prompt-cache key and static system/tool prefix are retained. Each BTW
+topic has its own stable provider-side conversation identity, separate from the
+main conversation and other topics. Successful serialized follow-ups reuse it;
+after a cancelled, failed, or interrupted turn the next request uses a new
+transport generation, so an unwinding request cannot share its state.
+Standalone ephemeral callers without a conversation key keep per-request IDs.
+Actual cache hits depend on the provider. The main-session context is still
+current, not frozen at the first question; advancing or compacting it can change
+the prefix.
+Saved BTW records contain visible answer text, not opaque provider reasoning or
+replay signatures, so restoration preserves the dialogue roles and text rather
+than a byte-for-byte native provider transcript.
+
+- `Esc` hides the inline answer or history without cancelling the request.
+- `x` explicitly cancels a running question; any partial answer is retained.
+- `c` copies the completed inline answer, or the selected topic's latest nonempty answer.
+- After an inline BTW answer completes, `f` opens that topic's follow-up input
+  directly, without requiring `/btw` first. The main editor must be empty and focused.
+- In history, `f` or `Enter` opens a native follow-up input for the selected topic.
+  Inside the input, `Enter` sends a nonempty question and `Esc` cancels the draft
+  and returns to history; `f`, `c`, and `x` are ordinary text.
+- Follow-ups append to the same topic, retain prior answers and cancelled partial
+  output, and survive resume. The original question remains the history-list title;
+  `Details` shows every question and answer in chronological order.
+- In history, `Up`/`Down` select topics; `Tab` switches between history and
+  details. `Right` focuses details, `Left` returns to history.
+- Focused details support scrolling, `Page Up`/`Page Down`, and `Home`/`End`.
+  Narrow terminals show one pane at a time.
+- New questions and follow-ups are refused while any BTW request is running,
+  even if its panel is hidden. There is no implicit cancellation or queue.
+- A refused follow-up submission keeps the draft for retry; repeated Enter while
+  submission is pending cannot create duplicate requests.
+
+History is saved as private per-topic files under the session artifact
+directory's `btw-history/` subdirectory. This changes `/btw` from transient-only
+display to local retention alongside the session. Even a session containing only
+side questions is made resumable. `--no-session` keeps history in memory only.
+Ordinary transcript export/share does not include these sidecar records.
+
+Starting a question saves its running state. Completion, error, and explicit
+cancellation save a final checkpoint; cancelled answers retain text already
+received. A crash can lose uncheckpointed streaming text, but a saved running
+record reopens as `Interrupted` and is never automatically resubmitted.
+History remains attached to the session artifacts and follows operations that
+copy or remove those artifacts; it does not move the conversation leaf.
+
+The existing inline `b` action still promotes a completed answer to a chat branch
+only when the original session/leaf is unchanged and the main session is idle.
+History browsing itself does not promote answers or relax these branch guards.
+
 ## Fork
 
 Interactive `/fork` creates a new session from the current one and switches the active session identity.

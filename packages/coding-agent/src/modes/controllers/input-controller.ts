@@ -290,10 +290,17 @@ export class InputController {
 		if (!this.#btwCopyListenerInstalled) {
 			this.#btwCopyListenerInstalled = true;
 			this.ctx.ui.addInputListener(data => {
-				if (!matchesKey(data, "c")) return undefined;
-				if (!this.ctx.canCopyBtw()) return undefined;
 				if (this.ctx.ui.getFocused() !== this.ctx.editor) return undefined;
 				if (this.ctx.editor.getText().trim()) return undefined;
+				if (matchesKey(data, "f") && this.ctx.canFollowUpBtw()) {
+					this.ctx.handleBtwFollowUpKey();
+					return { consume: true };
+				}
+				if (matchesKey(data, "x") && this.ctx.canCancelBtw()) {
+					this.ctx.handleBtwCancelKey();
+					return { consume: true };
+				}
+				if (!matchesKey(data, "c") || !this.ctx.canCopyBtw()) return undefined;
 				void this.ctx.handleBtwCopyKey();
 				return { consume: true };
 			});
