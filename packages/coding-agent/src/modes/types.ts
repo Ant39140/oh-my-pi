@@ -417,6 +417,7 @@ export interface InteractiveModeContext {
 	handleMoveCommand(targetPath?: string): Promise<void>;
 	/** `/wt`: fork the checkout into a new worktree (keeping changes) and move there. */
 	handleWorktreeCommand(branch?: string): Promise<void>;
+	withBtwSessionMove(operation: () => Promise<boolean>): Promise<boolean>;
 	handleRenameCommand(title: string): Promise<void>;
 	handleMemoryCommand(text: string): Promise<void>;
 	handleSTTToggle(): Promise<void>;
@@ -480,6 +481,8 @@ export interface InteractiveModeContext {
 	handlesBtwBranchKey(): boolean;
 	canCopyBtw(): boolean;
 	handleBtwCopyKey(): Promise<boolean>;
+	canFollowUpBtw(): boolean;
+	handleBtwFollowUpKey(): boolean;
 	handleBtwBranch(
 		question: string,
 		assistantMessage: AssistantMessage,

@@ -1276,29 +1276,31 @@ export class CommandController {
 			return false;
 		}
 
-		const previousState = this.ctx.sessionManager.captureState();
-		try {
-			await this.ctx.session.moveSession(resolvedPath);
-		} catch (err) {
-			this.ctx.showError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
-			return false;
-		}
-		let applied = false;
-		try {
-			applied = await this.ctx.applyCwdChange(resolvedPath);
-		} catch (error) {
-			await this.#restoreAfterMoveFailure(previousState, error);
-			return false;
-		}
-		if (!applied) {
-			await this.#restoreAfterMoveFailure(previousState);
-			return false;
-		}
+		return this.ctx.withBtwSessionMove(async () => {
+			const previousState = this.ctx.sessionManager.captureState();
+			try {
+				await this.ctx.session.moveSession(resolvedPath);
+			} catch (err) {
+				this.ctx.showError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
+				return false;
+			}
+			let applied = false;
+			try {
+				applied = await this.ctx.applyCwdChange(resolvedPath);
+			} catch (error) {
+				await this.#restoreAfterMoveFailure(previousState, error);
+				return false;
+			}
+			if (!applied) {
+				await this.#restoreAfterMoveFailure(previousState);
+				return false;
+			}
 
-		this.ctx.updateEditorBorderColor();
-		await this.ctx.reloadTodos();
-		this.ctx.ui.requestRender();
-		return true;
+			this.ctx.updateEditorBorderColor();
+			await this.ctx.reloadTodos();
+			this.ctx.ui.requestRender();
+			return true;
+		});
 	}
 
 	async handleRenameCommand(title: string): Promise<void> {
