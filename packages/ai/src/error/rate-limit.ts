@@ -32,8 +32,11 @@ const CREDITS_EXHAUSTED_PATTERN =
 	/\b(?:exceed\w*|insufficient|not enough)\b[^\n]{0,40}\bcredits?\b|\bcredits?\b[^\n]{0,40}\b(?:exhausted|depleted)\b/i;
 // Anthropic subscription entitlement wall: "Usage credits are required for this
 // model" with `error_code: credits_required`. The account cannot serve the model
-// at all, so rotate to a sibling rather than backing off on this one.
-const ANTHROPIC_CREDITS_REQUIRED_PATTERN = /usage.?credits|credits_required/i;
+// at all, so rotate to a sibling rather than backing off on this one. Bounded to
+// the documented sentence and the exact code: bare "usage credits" also appears
+// in unrelated diagnostics ("Failed to fetch usage credits from billing
+// service"), which must not rotate a healthy credential.
+const ANTHROPIC_CREDITS_REQUIRED_PATTERN = /\busage credits are required\b|\bcredits_required\b/i;
 const SPEND_LIMIT_PATTERN = /spend.?limit/i;
 const SUBSCRIPTION_CAP_PATTERN =
 	/\b(?:subscription|plan|membership)\b[^\n]{0,80}\b(?:rate.?limits?|quota|cap)\b|\b(?:rate.?limits?|quota|cap)\b[^\n]{0,80}\b(?:subscription|plan|membership)\b/i;
