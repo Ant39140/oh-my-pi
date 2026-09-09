@@ -1,10 +1,12 @@
-import { beforeAll, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import * as sessionWorktree from "@oh-my-pi/pi-coding-agent/session/session-worktree";
+import { Container } from "@oh-my-pi/pi-tui";
 
 function createMoveContext(sourceDir: string, settingsFlush?: () => Promise<void>) {
 	const state = { cwd: sourceDir, movedTo: undefined as string | undefined, completedBtwVisible: true };
@@ -53,7 +55,8 @@ function createMoveContext(sourceDir: string, settingsFlush?: () => Promise<void
 		withBtwSessionMove,
 		updateEditorBorderColor: vi.fn(),
 		reloadTodos: vi.fn(async () => {}),
-		ui: { requestRender: vi.fn() },
+		ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
+		statusContainer: new Container(),
 		present,
 		shutdown,
 	} as unknown as InteractiveModeContext;
@@ -65,6 +68,114 @@ describe("CommandController /move", () => {
 		const theme = await getThemeByName("dark");
 		if (!theme) throw new Error("Expected dark theme");
 		setThemeInstance(theme);
+	});
+
+	afterEach(() => vi.restoreAllMocks());
+
+	it("does not create a checkout when the BTW gate rejects a worktree command", async () => {
+		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-wt-gate-"));
+		try {
+			const { ctx, state } = createMoveContext(sourceDir);
+			const target = path.join(sourceDir, "checkout");
+			vi.spyOn(sessionWorktree, "createSessionWorktree").mockImplementation(async () => {
+				await fs.mkdir(target);
+				return { path: target, branch: "feature" };
+			});
+			ctx.withBtwSessionMove = vi.fn(async () => false);
+			await new CommandController(ctx).handleWorktreeCommand("feature");
+
+			expect(await fs.readdir(sourceDir)).toEqual([]);
+			expect(state.cwd).toBe(sourceDir);
+			expect(state.completedBtwVisible).toBe(true);
+			expect(ctx.session.moveSession).not.toHaveBeenCalled();
+			expect(ctx.present).not.toHaveBeenCalled();
+			expect(ctx.statusContainer.children).toHaveLength(0);
+		} finally {
+			await fs.rm(sourceDir, { recursive: true, force: true });
+		}
+	});
+
+	it("holds one migration gate through worktree creation, relocation and source cleanup", async () => {
+		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-wt-lifecycle-"));
+		const creating = Promise.withResolvers<void>();
+		const created = Promise.withResolvers<void>();
+		const relocating = Promise.withResolvers<void>();
+		const relocated = Promise.withResolvers<void>();
+		let command: Promise<void> | undefined;
+		try {
+			const { ctx, state } = createMoveContext(sourceDir);
+			const target = path.join(sourceDir, "checkout");
+			let held = false;
+			let commits = 0;
+			ctx.withBtwSessionMove = async operation => {
+				if (held) throw new Error("Nested migration gate");
+				held = true;
+				try {
+					const moved = await operation();
+					if (moved) commits++;
+					return moved;
+				} finally {
+					held = false;
+				}
+			};
+			vi.spyOn(sessionWorktree, "createSessionWorktree").mockImplementation(async () => {
+				expect(held).toBe(true);
+				creating.resolve();
+				await created.promise;
+				await fs.mkdir(target);
+				return { path: target, branch: "feature" };
+			});
+			ctx.session.moveSession = async cwd => {
+				expect(held).toBe(true);
+				relocating.resolve();
+				await relocated.promise;
+				state.cwd = cwd;
+			};
+			const cleanup = vi.spyOn(sessionWorktree, "cleanSourceCheckoutIfConfigured").mockImplementation(async () => {
+				expect(held).toBe(true);
+				expect(state.cwd).toBe(target);
+				return { cleaned: false };
+			});
+			command = new CommandController(ctx).handleWorktreeCommand("feature");
+			await creating.promise;
+			expect(held).toBe(true);
+			expect(commits).toBe(0);
+			created.resolve();
+			await relocating.promise;
+			expect(held).toBe(true);
+			expect(state.cwd).toBe(sourceDir);
+			expect(cleanup).not.toHaveBeenCalled();
+			relocated.resolve();
+			await command;
+			expect(held).toBe(false);
+			expect(commits).toBe(1);
+			expect(state.cwd).toBe(target);
+			expect(ctx.present).toHaveBeenCalled();
+			expect(ctx.statusContainer.children).toHaveLength(0);
+		} finally {
+			created.resolve();
+			relocated.resolve();
+			await command;
+			await fs.rm(sourceDir, { recursive: true, force: true });
+		}
+	});
+
+	it("releases the gate without relocating when worktree creation fails", async () => {
+		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-wt-failure-"));
+		try {
+			const { ctx, state, withBtwSessionMove } = createMoveContext(sourceDir);
+			vi.spyOn(sessionWorktree, "createSessionWorktree").mockRejectedValue(new Error("Branch already exists"));
+			await new CommandController(ctx).handleWorktreeCommand("feature");
+
+			expect(await withBtwSessionMove.mock.results[0]?.value).toBe(false);
+			expect(state.cwd).toBe(sourceDir);
+			expect(state.completedBtwVisible).toBe(true);
+			expect(ctx.session.moveSession).not.toHaveBeenCalled();
+			expect(ctx.statusContainer.children).toHaveLength(0);
+			expect(ctx.showError).toHaveBeenCalledWith(expect.stringContaining("Branch already exists"));
+		} finally {
+			await fs.rm(sourceDir, { recursive: true, force: true });
+		}
 	});
 
 	it("relocates the active session before re-scoping cwd-derived state", async () => {

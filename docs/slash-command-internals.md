@@ -341,6 +341,9 @@ committed in-memory view.
 Migration is non-destructive until the destination has been selected and
 validated. `/move`, `/wt`, and standalone persistent `!cd` refuse relocation while
 a BTW request is starting or running, asking the operator to finish or cancel it explicitly.
+The `/wt` gate is acquired before creating a branch or checkout and remains held
+through session relocation and configured source cleanup, so a busy refusal does
+not leave an unused worktree.
 The `!cd` guard runs before shell execution and remains held through cwd adoption
 or rollback, so a refused command cannot leave the shell in a different directory.
 Cancelled pickers, invalid destinations, and failed moves retain the BTW conversation.

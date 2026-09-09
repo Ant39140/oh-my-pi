@@ -1223,32 +1223,36 @@ export class CommandController {
 			this.ctx.showWarning("Wait for the current response to finish or abort it before creating a worktree.");
 			return;
 		}
-		const branchName = branch?.trim() || defaultSessionWorktreeBranch();
-		const cwd = this.ctx.sessionManager.getCwd();
-		this.ctx.statusContainer.disposeChildren();
-		const loader = new Loader(
-			this.ctx.ui,
-			spinner => theme.fg("accent", spinner),
-			text => theme.fg("muted", text),
-			`Creating worktree on ${branchName}…`,
-			getSymbolTheme().spinnerFrames,
-		);
-		this.ctx.statusContainer.addChild(loader);
-		this.ctx.ui.requestRender();
-		let worktree: SessionWorktree;
-		try {
-			worktree = await createSessionWorktree(cwd, this.ctx.settings, branchName);
-		} catch (err) {
-			this.ctx.showError(`Worktree creation failed: ${err instanceof Error ? err.message : String(err)}`);
-			return;
-		} finally {
-			loader.stop();
+		await this.#withSessionMove(async () => {
+			const branchName = branch?.trim() || defaultSessionWorktreeBranch();
+			const cwd = this.ctx.sessionManager.getCwd();
 			this.ctx.statusContainer.disposeChildren();
-		}
-		if (worktree.cloneError) {
-			logger.warn("worktree clone fell back to plain checkout", { path: worktree.path, error: worktree.cloneError });
-		}
-		if (await this.#withSessionMove(() => this.#relocateSession(worktree.path))) {
+			const loader = new Loader(
+				this.ctx.ui,
+				spinner => theme.fg("accent", spinner),
+				text => theme.fg("muted", text),
+				`Creating worktree on ${branchName}…`,
+				getSymbolTheme().spinnerFrames,
+			);
+			this.ctx.statusContainer.addChild(loader);
+			this.ctx.ui.requestRender();
+			let worktree: SessionWorktree;
+			try {
+				worktree = await createSessionWorktree(cwd, this.ctx.settings, branchName);
+			} catch (err) {
+				this.ctx.showError(`Worktree creation failed: ${err instanceof Error ? err.message : String(err)}`);
+				return false;
+			} finally {
+				loader.stop();
+				this.ctx.statusContainer.disposeChildren();
+			}
+			if (worktree.cloneError) {
+				logger.warn("worktree clone fell back to plain checkout", {
+					path: worktree.path,
+					error: worktree.cloneError,
+				});
+			}
+			if (!(await this.#relocateSession(worktree.path))) return false;
 			const cleanup = await cleanSourceCheckoutIfConfigured(cwd, this.ctx.settings);
 			if (cleanup.errorMessage !== undefined) {
 				this.ctx.showWarning(`Worktree created, but cleaning source checkout failed: ${cleanup.errorMessage}`);
@@ -1261,7 +1265,8 @@ export class CommandController {
 					1,
 				),
 			]);
-		}
+			return true;
+		});
 	}
 
 	/** Save source settings before acquiring the gate for a complete relocation operation. */
