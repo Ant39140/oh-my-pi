@@ -679,6 +679,13 @@ describe("isUsageLimitOutcome", () => {
 		expect(isUsageLimitOutcome(429, message)).toBe(false);
 		expect(isUsageLimit(Object.assign(new Error(message), { status: 429 }))).toBe(false);
 	});
+
+	it("rotates Anthropic credits-required walls", () => {
+		const body =
+			'429 {"type":"error","error":{"type":"rate_limit_error","message":"Usage credits are required for this model.","details":{"error_code":"credits_required","model":"claude-fable-5"}}}';
+		expect(parseRateLimitReason(body)).toBe("QUOTA_EXHAUSTED");
+		expect(isUsageLimitOutcome(429, body)).toBe(true);
+	});
 });
 
 describe("calculateRateLimitBackoffMs", () => {

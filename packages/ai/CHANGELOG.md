@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Anthropic `credits_required` responses now rotate to another account instead of retrying the same one: the entitlement wall is a quota outcome, so a session no longer repeats the request against an account that cannot serve the model ([#11326](https://github.com/can1357/oh-my-pi/pull/11326) by [@AshishKumar4](https://github.com/AshishKumar4)).
+
 ## [18.1.15] - 2026-09-08
 
 ### Fixed

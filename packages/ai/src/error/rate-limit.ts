@@ -30,6 +30,10 @@ const INSUFFICIENT_BALANCE_PATTERN = /insufficient.?balance/i;
 // "credits exhausted". Account-local, so rotate to a sibling credential.
 const CREDITS_EXHAUSTED_PATTERN =
 	/\b(?:exceed\w*|insufficient|not enough)\b[^\n]{0,40}\bcredits?\b|\bcredits?\b[^\n]{0,40}\b(?:exhausted|depleted)\b/i;
+// Anthropic subscription entitlement wall: "Usage credits are required for this
+// model" with `error_code: credits_required`. The account cannot serve the model
+// at all, so rotate to a sibling rather than backing off on this one.
+const ANTHROPIC_CREDITS_REQUIRED_PATTERN = /usage.?credits|credits_required/i;
 const SPEND_LIMIT_PATTERN = /spend.?limit/i;
 const SUBSCRIPTION_CAP_PATTERN =
 	/\b(?:subscription|plan|membership)\b[^\n]{0,80}\b(?:rate.?limits?|quota|cap)\b|\b(?:rate.?limits?|quota|cap)\b[^\n]{0,80}\b(?:subscription|plan|membership)\b/i;
@@ -234,6 +238,10 @@ export function parseRateLimitReason(errorMessage: string): RateLimitReason {
 		return "QUOTA_EXHAUSTED";
 	}
 
+	if (ANTHROPIC_CREDITS_REQUIRED_PATTERN.test(errorMessage)) {
+		return "QUOTA_EXHAUSTED";
+	}
+
 	if (
 		lower.includes("per minute") ||
 		lower.includes("rate limit") ||
@@ -397,6 +405,7 @@ export function matchesUsageLimitText(errorMessage: string): boolean {
 	if (isDashScopeTokenLimitText(errorMessage)) return false;
 	return (
 		USAGE_LIMIT_PATTERN.test(errorMessage) ||
+		ANTHROPIC_CREDITS_REQUIRED_PATTERN.test(errorMessage) ||
 		CREDITS_EXHAUSTED_PATTERN.test(errorMessage) ||
 		(CN_QUOTA_EXHAUSTED_PATTERN.test(errorMessage) && !CN_TRANSIENT_CAP_PATTERN.test(errorMessage)) ||
 		SPEND_LIMIT_PATTERN.test(errorMessage) ||
