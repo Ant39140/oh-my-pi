@@ -137,6 +137,80 @@ async function harness() {
 }
 
 describe("BTW follow-up lifecycle", () => {
+	it("blocks flushing, relocation, branching and disposal after a terminal CAS failure without losing the answer", async () => {
+		const h = await harness();
+		await h.controller.start("Keep the final answer");
+		const topic = (await records(h.manager))[0]!;
+		const recordPath = path.join(h.manager.getArtifactsDir()!, "btw-history", `entry-${topic.id}.json`);
+		const originalBytes = await Bun.file(recordPath).text();
+		const failed = Promise.withResolvers<void>();
+		vi.spyOn(h.ctx, "showError").mockImplementation(() => failed.resolve());
+		try {
+			const externalBytes = JSON.stringify({ ...JSON.parse(originalBytes), answer: "External content" });
+			await Bun.write(recordPath, externalBytes);
+			h.requests.at(-1)!.resolve(answer("Unsaved final answer"));
+			await failed.promise;
+			await expect(h.controller.flush()).rejects.toThrow("BTW history could not be saved");
+			await expect(h.controller.flush()).rejects.toThrow("BTW history could not be saved");
+			const operation = vi.fn(async () => true);
+			expect(await h.controller.withSessionMove(operation)).toBe(false);
+			expect(operation).not.toHaveBeenCalled();
+			expect(await h.controller.handleBranch()).toBe(false);
+			expect(h.ctx.handleBtwBranch).not.toHaveBeenCalled();
+			await expect(h.controller.dispose()).rejects.toThrow("BTW history could not be saved");
+			expect(h.controller.canCopy()).toBe(true);
+			const copy = vi.spyOn(clipboard, "copyToClipboard").mockResolvedValue(undefined);
+			expect(await h.controller.handleCopy()).toBe(true);
+			expect(copy).toHaveBeenCalledWith("Unsaved final answer");
+			expect(await Bun.file(recordPath).text()).toBe(externalBytes);
+
+			// Restoring the exact revision repairs this synthetic conflict without
+			// letting recovery silently rebase over another writer's contents.
+			await Bun.write(recordPath, originalBytes);
+			await h.controller.flush();
+			expect((await records(h.manager))[0]?.answer).toBe("Unsaved final answer");
+			expect(await h.controller.withSessionMove(operation)).toBe(true);
+			expect(operation).toHaveBeenCalledTimes(1);
+		} finally {
+			// Keep teardown safe even if an earlier assertion fails before repair.
+			if ((await Bun.file(recordPath).text()).includes("External content")) {
+				await Bun.write(recordPath, originalBytes);
+				await h.controller.flush();
+			}
+		}
+	});
+
+	it("retries a failed terminal I/O checkpoint after storage recovers before allowing a move", async () => {
+		const h = await harness();
+		await h.controller.start("Survive a storage error");
+		const failed = Promise.withResolvers<void>();
+		const writeFile = fs.writeFile;
+		let unavailable = true;
+		vi.spyOn(fs, "writeFile").mockImplementation(async (file, data, options) => {
+			if (unavailable && typeof file === "string" && file.startsWith(h.directory) && file.endsWith(".tmp")) {
+				failed.resolve();
+				throw new Error("Synthetic storage failure");
+			}
+			return writeFile(file, data, options);
+		});
+		try {
+			h.requests.at(-1)!.resolve(answer("Retained answer"));
+			await failed.promise;
+			await expect(h.controller.flush()).rejects.toThrow("Synthetic storage failure");
+			expect((await records(h.manager))[0]?.answer).toBe("");
+			const operation = vi.fn(async () => true);
+			expect(await h.controller.withSessionMove(operation)).toBe(false);
+			expect(operation).not.toHaveBeenCalled();
+			unavailable = false;
+			expect(await h.controller.withSessionMove(operation)).toBe(true);
+			expect(operation).toHaveBeenCalledTimes(1);
+			expect((await records(h.manager))[0]?.answer).toBe("Retained answer");
+		} finally {
+			unavailable = false;
+			await h.controller.flush();
+		}
+	});
+
 	it("rejects a stale topic before model dispatch and retries with refreshed history", async () => {
 		const h = await harness();
 		const topic = await h.root("Topic", "Original answer");

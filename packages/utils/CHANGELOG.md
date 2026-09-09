@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added public `acquireFileLock()` and `FileLockHandle` APIs for holding and explicitly releasing exclusive OS-backed file locks.
+
 ## [18.1.13] - 2026-09-07
 
 ### Fixed

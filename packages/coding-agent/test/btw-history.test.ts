@@ -104,6 +104,8 @@ describe("BtwHistoryStore", () => {
 		const complete = { ...running, status: "complete" as const, answer: "Owner answer" };
 		await owner.upsert(complete);
 		await expect(attempted).rejects.toThrow("BTW history conflict");
+		await expect(contender.retry({ ...running, status: "complete" })).rejects.toThrow("BTW history conflict");
+		await expect(contender.flush()).rejects.toThrow("BTW history conflict");
 		expect(contender.getRecords()).toEqual([]);
 		expect((await BtwHistoryStore.open(artifactsDir)).getRecords()).toEqual([complete]);
 	});
@@ -126,6 +128,10 @@ describe("BtwHistoryStore", () => {
 		await expect(
 			stale.upsert({ ...staleView[0]!, followUps: [{ ...followUp, question: "Stale follow-up" }] }),
 		).rejects.toThrow("BTW history conflict");
+		await expect(stale.retry({ ...original, answer: "Stale terminal answer" })).rejects.toThrow(
+			"BTW history conflict",
+		);
+		await expect(stale.flush()).rejects.toThrow("BTW history conflict");
 		expect(stale.getRecords()).toBe(staleView);
 		expect((await BtwHistoryStore.open(artifactsDir)).getRecords()).toEqual([committed]);
 	});
@@ -303,8 +309,10 @@ describe("BtwHistoryStore", () => {
 		const saved = record("saved", { status: "running" });
 		await store.upsert(saved);
 		const filePath = path.join(artifactsDir, "btw-history", "entry-saved.json");
+		const savedBytes = await Bun.file(filePath).text();
 		await Bun.write(filePath, "broken");
 		await expect(store.upsert({ ...saved, answer: "Replacement" })).rejects.toThrow("Failed to read BTW history");
+		await expect(store.retry({ ...saved, answer: "Replacement" })).rejects.toThrow("Failed to read BTW history");
 		await expect(store.flush()).rejects.toThrow("Failed to read BTW history");
 		await expect(store.upsert(record("later"))).rejects.toThrow("Failed to read BTW history");
 		await expect(store.flush()).rejects.toThrow("Failed to read BTW history");
@@ -316,14 +324,88 @@ describe("BtwHistoryStore", () => {
 		await withFileLock(
 			filePath,
 			async () => {
-				await Bun.write(filePath, JSON.stringify(saved));
+				await Bun.write(filePath, savedBytes);
 			},
 			{ retries: 1 },
 		);
-		const reopened = await BtwHistoryStore.open(artifactsDir);
-		const finished = { ...reopened.getRecords()[0]!, answer: "Recovered after error", status: "complete" as const };
-		await reopened.upsert(finished);
+		await expect(store.flush()).rejects.toThrow("Failed to read BTW history");
+		const finished = { ...saved, answer: "Recovered after error", status: "complete" as const };
+		await expect(store.upsert(finished)).rejects.toThrow("Failed to read BTW history");
+		await store.retry(finished);
+		await store.flush();
+		expect(store.getRecords()).toEqual([finished]);
 		expect((await BtwHistoryStore.open(artifactsDir)).getRecords()).toEqual([finished]);
+	});
+
+	it("retries a terminal checkpoint after repairing the filesystem without publishing a failed snapshot", async () => {
+		const store = await BtwHistoryStore.open(artifactsDir);
+		const running = record("topic", { status: "running", answer: "Checkpointed partial" });
+		await store.upsert(running);
+		const oldView = store.getRecords();
+		const filePath = path.join(artifactsDir, "btw-history", "entry-topic.json");
+		const backupPath = path.join(directory, "checkpoint-backup");
+		const savedBytes = await Bun.file(filePath).text();
+		await fs.rename(filePath, backupPath);
+		await fs.mkdir(filePath);
+		const terminal = { ...running, status: "complete" as const, answer: "Retained terminal answer" };
+
+		await expect(store.upsert(terminal)).rejects.toThrow("Expected a regular file");
+		await expect(store.flush()).rejects.toThrow("Expected a regular file");
+		expect(store.getRecords()).toBe(oldView);
+		expect(await Bun.file(backupPath).text()).toBe(savedBytes);
+
+		await fs.rm(filePath, { recursive: true });
+		await fs.rename(backupPath, filePath);
+		await expect(store.flush()).rejects.toThrow("Expected a regular file");
+		await expect(store.upsert(terminal)).rejects.toThrow("Expected a regular file");
+
+		const lease = await acquireFileLock(filePath);
+		let retry: Promise<void>;
+		try {
+			retry = store.retry(terminal);
+			expect(store.getRecords()).toBe(oldView);
+			expect(await Bun.file(filePath).text()).toBe(savedBytes);
+			terminal.answer = "Uncheckpointed mutation";
+		} finally {
+			lease.release();
+		}
+		await retry;
+		await store.flush();
+		const committed = { ...terminal, answer: "Retained terminal answer" };
+		expect(store.getRecords()).toEqual([committed]);
+		expect((await BtwHistoryStore.open(artifactsDir)).getRecords()).toEqual([committed]);
+		expect(oldView).toEqual([running]);
+	});
+
+	it("keeps a later failed retry sticky after an earlier retry succeeds", async () => {
+		const store = await BtwHistoryStore.open(artifactsDir);
+		const saved = record("topic");
+		await store.upsert(saved);
+		const filePath = path.join(artifactsDir, "btw-history", "entry-topic.json");
+		const savedBytes = await Bun.file(filePath).text();
+		await Bun.write(filePath, "broken");
+		await expect(store.upsert({ ...saved, answer: "Failed checkpoint" })).rejects.toThrow(
+			"Failed to read BTW history",
+		);
+		await Bun.write(filePath, savedBytes);
+		const collisionPath = path.join(artifactsDir, "btw-history", "entry-collision.json");
+		const collisionBytes = JSON.stringify(record("collision", { answer: "Another writer's answer" }));
+		await Bun.write(collisionPath, collisionBytes);
+
+		const terminal = { ...saved, answer: "Retried checkpoint" };
+		const successful = store.retry(terminal);
+		const conflicting = store.retry(record("collision"));
+		const failedRetry = expect(conflicting).rejects.toThrow("BTW history conflict");
+		const failedFlush = expect(store.flush()).rejects.toThrow("BTW history conflict");
+		await successful;
+		await failedRetry;
+		await failedFlush;
+		await expect(store.upsert({ ...terminal, answer: "Must remain blocked" })).rejects.toThrow(
+			"BTW history conflict",
+		);
+		expect(store.getRecords()).toEqual([terminal]);
+		expect(await Bun.file(filePath).json()).toEqual(terminal);
+		expect(await Bun.file(collisionPath).text()).toBe(collisionBytes);
 	});
 
 	it("publishes private records and removes staged files after queued writes drain", async () => {

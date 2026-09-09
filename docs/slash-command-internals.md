@@ -339,15 +339,22 @@ retrying reads the latest saved history. Rejected writes never replace the
 committed in-memory view.
 
 Migration is non-destructive until the destination has been selected and
-validated. `/move` and `/wt` refuse relocation while a BTW request is starting
-or running, asking the operator to finish or cancel it explicitly. Cancelled
-pickers, invalid destinations, and failed moves retain the BTW conversation.
+validated. `/move`, `/wt`, and standalone persistent `!cd` refuse relocation while
+a BTW request is starting or running, asking the operator to finish or cancel it explicitly.
+The `!cd` guard runs before shell execution and remains held through cwd adoption
+or rollback, so a refused command cannot leave the shell in a different directory.
+Cancelled pickers, invalid destinations, and failed moves retain the BTW conversation.
 Successful relocation clears the old view only after moving the saved artifacts.
 
 Session operations wait at most 10 seconds for outstanding BTW persistence.
 A timeout stops the operation and leaves the current session in place; it does
 not cancel the underlying filesystem write or allow migration/deletion to run
-later when that write completes. The operator can retry once storage responds.
+later when that write completes. A failed terminal checkpoint also stops these
+operations after its pending promise has settled; the unsaved answer remains
+available to view and copy. Retrying the operation retries the retained snapshot
+against its original disk revision. Transient I/O failures can recover, but a
+conflict never silently rebases over another writer's changes. An initial
+checkpoint rejection still prevents model dispatch and can reload history normally.
 
 Starting a question saves its running state. Completion, error, and explicit
 cancellation save a final checkpoint; cancelled answers retain text already

@@ -150,8 +150,17 @@ export class BtwHistoryStore {
 		return this.#snapshot;
 	}
 
-	async upsert(record: BtwHistoryRecord): Promise<void> {
-		if (this.#writeError) throw this.#writeError;
+	upsert(record: BtwHistoryRecord): Promise<void> {
+		return this.#upsert(record, false);
+	}
+
+	/** Retry a failed checkpoint against the original revision, without rebasing onto disk changes. */
+	retry(record: BtwHistoryRecord): Promise<void> {
+		return this.#upsert(record, true);
+	}
+
+	async #upsert(record: BtwHistoryRecord, retry: boolean): Promise<void> {
+		if (this.#writeError && !retry) throw this.#writeError;
 		// Capture before yielding: callers may keep mutating their streaming record.
 		const snapshot = snapshotRecord(parseRecord(record));
 		if (this.#directory === undefined) {
@@ -162,6 +171,9 @@ export class BtwHistoryStore {
 		const directory = this.#directory;
 		const content = `${JSON.stringify(snapshot)}\n`;
 		const write = this.#pending.then(async () => {
+			// Reset only at this queue boundary: earlier attempts and their error
+			// handlers must settle before an explicit retry can recover the store.
+			if (retry) this.#writeError = undefined;
 			if (this.#writeError) throw this.#writeError;
 			await fs.mkdir(directory, { recursive: true, mode: 0o700 });
 			if (process.platform !== "win32") await fs.chmod(directory, 0o700);
@@ -193,7 +205,7 @@ export class BtwHistoryStore {
 			}
 		});
 		// Keep the queue handled while retaining the original failure for callers
-		// and every later flush/upsert. A successful drain must not hide data loss.
+		// and every later flush/upsert until an explicit retry. A successful drain must not hide data loss.
 		this.#pending = write.catch(error => {
 			this.#writeError ??= toError(error);
 			// A sticky failure prevents all later terminal writes, so release every

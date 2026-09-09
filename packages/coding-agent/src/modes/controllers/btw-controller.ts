@@ -1,6 +1,6 @@
 import type { AssistantMessage, Message } from "@oh-my-pi/pi-ai";
 import { type OverlayHandle, replaceTabs } from "@oh-my-pi/pi-tui";
-import { logger, prompt, Snowflake, withTimeout } from "@oh-my-pi/pi-utils";
+import { logger, prompt, Snowflake, toError, withTimeout } from "@oh-my-pi/pi-utils";
 import btwUserPrompt from "../../prompts/system/btw-user.md" with { type: "text" };
 import {
 	type BtwHistoryRecord,
@@ -25,6 +25,8 @@ interface BtwRequest {
 	store: BtwHistoryStore;
 	record: BtwHistoryRecord;
 	history?: readonly BtwHistoryTurn[];
+	/** At least one checkpoint belongs to this request; later failures must block lifecycle changes. */
+	persisted: boolean;
 	conversationKey: string;
 }
 
@@ -70,6 +72,7 @@ export class BtwController {
 	#historyPanel: BtwHistoryPanel | undefined;
 	#historyOverlay: OverlayHandle | undefined;
 	readonly #writes = new Set<Promise<boolean>>();
+	readonly #failedWrites = new Map<BtwRequest, Error>();
 
 	constructor(private readonly ctx: InteractiveModeContext) {}
 
@@ -160,6 +163,9 @@ export class BtwController {
 			await this.flush();
 			await this.ctx.handleBtwBranch(question, assistantMessage, leafId, sessionId);
 			return true;
+		} catch (error) {
+			this.ctx.showError(`Cannot branch /btw: ${toError(error).message}`);
+			return false;
 		} finally {
 			this.#branchInFlight = false;
 			if (this.#activeRequest === request) request.component.markComplete();
@@ -238,7 +244,18 @@ export class BtwController {
 	}
 
 	async #drainWrites(): Promise<void> {
+		// Retrying a session operation retries already-failed snapshots without
+		// rebasing their disk revisions. Newly failing writes still reject below.
+		const failuresAtStart = [...this.#failedWrites.keys()];
+		for (const request of failuresAtStart) await this.#persist(request, true);
 		while (this.#writes.size > 0) await Promise.all(this.#writes);
+		const failure = this.#failedWrites.values().next().value;
+		if (failure) {
+			throw new Error(
+				`BTW history could not be saved. The session operation was stopped; retry after resolving storage errors. Unsaved answers remain available in /btw. ${failure.message}`,
+				{ cause: failure },
+			);
+		}
 	}
 
 	async withSessionMove(operation: () => Promise<boolean>): Promise<boolean> {
@@ -383,6 +400,7 @@ export class BtwController {
 				record,
 				history,
 				conversationKey: `btw:${record.id}:${transportEpoch}`,
+				persisted: false,
 			};
 			this.#activeRequest = request;
 			this.#visible = !previous || !this.#historyOverlay;
@@ -491,10 +509,18 @@ export class BtwController {
 		this.ctx.ui.requestRender();
 	}
 
-	#persist(request: BtwRequest): Promise<boolean> {
-		const write = request.store.upsert(request.record).then(
-			() => true,
+	#persist(request: BtwRequest, retry = false): Promise<boolean> {
+		const pending = retry ? request.store.retry(request.record) : request.store.upsert(request.record);
+		const write = pending.then(
+			() => {
+				request.persisted = true;
+				this.#failedWrites.delete(request);
+				return true;
+			},
 			error => {
+				// An initial rejection never dispatched a model or owned a disk
+				// checkpoint; terminal failures must survive removal from #writes.
+				if (request.persisted) this.#failedWrites.set(request, toError(error));
 				logger.error("BTW history save failed", { error });
 				if (request.sessionId === this.ctx.sessionManager.getSessionId()) {
 					this.ctx.showError(

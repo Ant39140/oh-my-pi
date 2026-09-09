@@ -10,6 +10,8 @@
 - Copying a BTW topic now falls back to its most recent nonempty answer after an empty failed or cancelled follow-up.
 - Invalid or cancelled `/move` operations no longer cancel BTW requests; busy side conversations block relocation, and stalled history writes stop session operations with a bounded error instead of hanging indefinitely.
 - Session shutdown now shows closing progress before waiting for live commands or BTW history writes, and stops progress updates when cleanup completes or fails.
+- Failed BTW terminal saves now block session operations while retaining the answer for copying and safe retry, instead of being treated as a successful flush.
+- Standalone `!cd` now shares the BTW relocation guard with `/move` and `/wt`, refusing before shell execution when a side conversation is active or unsaved.
 - Read error and preview rendering now sanitizes tabs and Windows-style CRLF (e.g. ssh host-key failures, tab-indented fetched content) so raw output can no longer tear the result frame.
 ### Added
 

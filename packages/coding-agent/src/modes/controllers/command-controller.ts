@@ -1205,7 +1205,7 @@ export class CommandController {
 				return;
 			}
 		}
-		if (await this.#relocateSession(resolvedPath)) {
+		if (await this.#withSessionMove(() => this.#relocateSession(resolvedPath))) {
 			this.ctx.present([
 				new Spacer(1),
 				new Text(`${theme.fg("accent", `${theme.status.success} Moved to ${resolvedPath}`)}`, 1, 1),
@@ -1248,7 +1248,7 @@ export class CommandController {
 		if (worktree.cloneError) {
 			logger.warn("worktree clone fell back to plain checkout", { path: worktree.path, error: worktree.cloneError });
 		}
-		if (await this.#relocateSession(worktree.path)) {
+		if (await this.#withSessionMove(() => this.#relocateSession(worktree.path))) {
 			const cleanup = await cleanSourceCheckoutIfConfigured(cwd, this.ctx.settings);
 			if (cleanup.errorMessage !== undefined) {
 				this.ctx.showWarning(`Worktree created, but cleaning source checkout failed: ${cleanup.errorMessage}`);
@@ -1264,11 +1264,8 @@ export class CommandController {
 		}
 	}
 
-	/**
-	 * Move the session and process cwd to an existing directory, rolling back
-	 * on failure. Returns true when the session now lives at `resolvedPath`.
-	 */
-	async #relocateSession(resolvedPath: string): Promise<boolean> {
+	/** Save source settings before acquiring the gate for a complete relocation operation. */
+	async #withSessionMove(operation: () => Promise<boolean>): Promise<boolean> {
 		try {
 			await this.ctx.settings.flush();
 		} catch (err) {
@@ -1276,31 +1273,36 @@ export class CommandController {
 			return false;
 		}
 
-		return this.ctx.withBtwSessionMove(async () => {
-			const previousState = this.ctx.sessionManager.captureState();
-			try {
-				await this.ctx.session.moveSession(resolvedPath);
-			} catch (err) {
-				this.ctx.showError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
-				return false;
-			}
-			let applied = false;
-			try {
-				applied = await this.ctx.applyCwdChange(resolvedPath);
-			} catch (error) {
-				await this.#restoreAfterMoveFailure(previousState, error);
-				return false;
-			}
-			if (!applied) {
-				await this.#restoreAfterMoveFailure(previousState);
-				return false;
-			}
+		return this.ctx.withBtwSessionMove(operation);
+	}
 
-			this.ctx.updateEditorBorderColor();
-			await this.ctx.reloadTodos();
-			this.ctx.ui.requestRender();
-			return true;
-		});
+	/** Relocate only while #withSessionMove holds the BTW gate; false means no successful move. */
+	async #relocateSession(resolvedPath: string): Promise<boolean> {
+		if (resolvedPath === path.resolve(this.ctx.sessionManager.getCwd())) return false;
+
+		const previousState = this.ctx.sessionManager.captureState();
+		try {
+			await this.ctx.session.moveSession(resolvedPath);
+		} catch (err) {
+			this.ctx.showError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
+		}
+		let applied = false;
+		try {
+			applied = await this.ctx.applyCwdChange(resolvedPath);
+		} catch (error) {
+			await this.#restoreAfterMoveFailure(previousState, error);
+			return false;
+		}
+		if (!applied) {
+			await this.#restoreAfterMoveFailure(previousState);
+			return false;
+		}
+
+		this.ctx.updateEditorBorderColor();
+		await this.ctx.reloadTodos();
+		this.ctx.ui.requestRender();
+		return true;
 	}
 
 	async handleRenameCommand(title: string): Promise<void> {
@@ -1325,6 +1327,20 @@ export class CommandController {
 			return;
 		}
 
+		if (shouldPersistCwd) {
+			await this.#withSessionMove(() => this.#executeBashCommand(command, excludeFromContext, isDeferred, true));
+		} else {
+			await this.#executeBashCommand(command, excludeFromContext, isDeferred, false);
+		}
+	}
+
+	/** Returns whether shell execution committed a cwd relocation, not whether the shell command succeeded. */
+	async #executeBashCommand(
+		command: string,
+		excludeFromContext: boolean,
+		isDeferred: boolean,
+		shouldPersistCwd: boolean,
+	): Promise<boolean> {
 		this.ctx.bashComponent = new BashExecutionComponent(command, this.ctx.ui, excludeFromContext);
 
 		if (isDeferred) {
@@ -1364,7 +1380,7 @@ export class CommandController {
 				});
 			}
 			try {
-				if (shouldPersistCwd) await this.#applyBashResultCwd(result);
+				if (shouldPersistCwd) return await this.#applyBashResultCwd(result);
 			} catch (error) {
 				this.ctx.showError(
 					`Bash command completed, but OMP failed to update its working directory: ${
@@ -1377,37 +1393,19 @@ export class CommandController {
 				this.ctx.bashComponent.setComplete(undefined, false);
 			}
 			this.ctx.showError(`Bash command failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+		} finally {
+			this.ctx.bashComponent = undefined;
+			this.ctx.ui.requestRender();
 		}
-
-		this.ctx.bashComponent = undefined;
-		this.ctx.ui.requestRender();
+		return false;
 	}
 
-	async #moveInteractiveCwd(resolvedPath: string): Promise<void> {
-		const previousState = this.ctx.sessionManager.captureState();
-		await this.ctx.sessionManager.moveTo(resolvedPath);
-		let applied = false;
-		try {
-			applied = await this.ctx.applyCwdChange(resolvedPath);
-		} catch (error) {
-			await this.#restoreAfterMoveFailure(previousState, error);
-			return;
-		}
-		if (!applied) {
-			await this.#restoreAfterMoveFailure(previousState);
-			return;
-		}
-
-		this.ctx.updateEditorBorderColor();
-		await this.ctx.reloadTodos();
-	}
-
-	async #applyBashResultCwd(result: BashResult): Promise<void> {
-		if (result.cancelled || result.exitCode !== 0 || !result.workingDir) return;
-		if (!path.isAbsolute(result.workingDir)) return;
+	async #applyBashResultCwd(result: BashResult): Promise<boolean> {
+		if (result.cancelled || result.exitCode !== 0 || !result.workingDir) return false;
+		if (!path.isAbsolute(result.workingDir)) return false;
 
 		const resolvedPath = path.resolve(result.workingDir);
-		if (resolvedPath === path.resolve(this.ctx.sessionManager.getCwd())) return;
+		if (resolvedPath === path.resolve(this.ctx.sessionManager.getCwd())) return false;
 
 		let isDirectory = false;
 		try {
@@ -1415,9 +1413,9 @@ export class CommandController {
 		} catch {
 			isDirectory = false;
 		}
-		if (!isDirectory) return;
+		if (!isDirectory) return false;
 
-		await this.#moveInteractiveCwd(resolvedPath);
+		return this.#relocateSession(resolvedPath);
 	}
 
 	async handlePythonCommand(code: string, excludeFromContext = false): Promise<void> {
