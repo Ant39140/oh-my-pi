@@ -25,6 +25,7 @@ import {
 	matchesSelectPageUp,
 	matchesSelectUp,
 } from "../utils/keybinding-matchers";
+import { sanitizeErrorLine } from "./error-block";
 import { sanitizeDisplayLine, sanitizeDisplayText } from "./extensions/display-text";
 import { editorKey, rawKeyHint } from "./keybinding-hints";
 import { bottomBorder, fit, row, splitBodyWidth, splitRow, topBorder } from "./overlay-box";
@@ -349,7 +350,7 @@ export class BtwHistoryPanel implements Component, Focusable {
 					width,
 				),
 			);
-		if (turn.error) lines.push("", ...wrapTextWithAnsi(theme.fg("error", sanitizeDisplayText(turn.error)), width));
+		if (turn.error) lines.push("", ...wrapTextWithAnsi(theme.fg("error", sanitizeErrorLine(turn.error)), width));
 		if (turn.status === "interrupted")
 			lines.push("", ...wrapTextWithAnsi(theme.fg("muted", "Not resumed in this view."), width));
 		return {

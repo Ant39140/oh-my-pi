@@ -1,6 +1,7 @@
 import { type Component, Markdown, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
 import { replaceTabs } from "../../tools/render-utils";
 import { getMarkdownTheme, theme } from "../theme/theme";
+import { sanitizeErrorLine } from "./error-block";
 import { OverlayPanel } from "./overlay-box";
 
 type BtwPanelState = "running" | "complete" | "branching" | "aborted" | "error";
@@ -145,7 +146,7 @@ export class BtwPanelComponent extends OverlayPanel {
 
 	#contentComponent(): Component {
 		if (this.#state === "error") {
-			return new Text(theme.fg("error", replaceTabs(this.#errorMessage ?? "Unknown error")), 0, 0);
+			return new Text(theme.fg("error", sanitizeErrorLine(this.#errorMessage ?? "Unknown error")), 0, 0);
 		}
 		const text = this.#visibleAnswer;
 		if (!text) {

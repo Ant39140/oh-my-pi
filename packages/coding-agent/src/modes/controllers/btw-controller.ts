@@ -10,9 +10,11 @@ import {
 	getBtwLatestTurn,
 	getBtwTurns,
 } from "../../session/btw-history";
+import { TRUNCATE_LENGTHS } from "../../tools/render-utils";
 import { copyToClipboard } from "../../utils/clipboard";
 import { BtwHistoryPanel } from "../components/btw-history-panel";
 import { BtwPanelComponent } from "../components/btw-panel";
+import { sanitizeErrorLine } from "../components/error-block";
 import type { InteractiveModeContext } from "../types";
 
 interface BtwRequest {
@@ -133,7 +135,7 @@ export class BtwController {
 			this.ctx.showStatus("Copied /btw answer to clipboard");
 			return true;
 		} catch (error) {
-			this.ctx.showError(error instanceof Error ? error.message : String(error));
+			this.ctx.showError(sanitizeErrorLine(error));
 			return true;
 		} finally {
 			this.#copyInFlight = false;
@@ -164,7 +166,7 @@ export class BtwController {
 			await this.ctx.handleBtwBranch(question, assistantMessage, leafId, sessionId);
 			return true;
 		} catch (error) {
-			this.ctx.showError(`Cannot branch /btw: ${toError(error).message}`);
+			this.ctx.showError(sanitizeErrorLine(`Cannot branch /btw: ${toError(error).message}`));
 			return false;
 		} finally {
 			this.#branchInFlight = false;
@@ -252,7 +254,10 @@ export class BtwController {
 		const failure = this.#failedWrites.values().next().value;
 		if (failure) {
 			throw new Error(
-				`BTW history could not be saved. The session operation was stopped; retry after resolving storage errors. Unsaved answers remain available in /btw. ${failure.message}`,
+				sanitizeErrorLine(
+					`BTW history could not be saved: ${sanitizeErrorLine(failure)}. The session operation was stopped; retry after fixing storage. Unsaved answers remain in /btw.`,
+					TRUNCATE_LENGTHS.RECAP,
+				),
 				{ cause: failure },
 			);
 		}
@@ -275,7 +280,7 @@ export class BtwController {
 			if (moved) await this.dispose();
 			return moved;
 		} catch (error) {
-			this.ctx.showError(error instanceof Error ? error.message : String(error));
+			this.ctx.showError(sanitizeErrorLine(error));
 			return false;
 		} finally {
 			this.#transitionCount--;
@@ -428,7 +433,7 @@ export class BtwController {
 			void this.#runRequest(request);
 			return true;
 		} catch (error) {
-			this.ctx.showError(`Cannot open /btw history: ${error instanceof Error ? error.message : String(error)}`);
+			this.ctx.showError(sanitizeErrorLine(`Cannot open /btw history: ${toError(error).message}`));
 			return false;
 		} finally {
 			this.#starting = false;
@@ -523,9 +528,7 @@ export class BtwController {
 				if (request.persisted) this.#failedWrites.set(request, toError(error));
 				logger.error("BTW history save failed", { error });
 				if (request.sessionId === this.ctx.sessionManager.getSessionId()) {
-					this.ctx.showError(
-						`Could not save /btw history: ${error instanceof Error ? error.message : String(error)}`,
-					);
+					this.ctx.showError(sanitizeErrorLine(`Could not save /btw history: ${toError(error).message}`));
 				}
 				return false;
 			},

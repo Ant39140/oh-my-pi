@@ -1193,19 +1193,24 @@ export class CommandController {
 				this.ctx.showError(`Cannot create "${path.basename(resolvedPath)}": parent directory does not exist`);
 				return;
 			}
-			const confirmed = await this.ctx.showHookConfirm(
-				"Create directory?",
-				`"${path.basename(resolvedPath)}" does not exist. Create it?`,
-			);
-			if (!confirmed) return;
-			try {
-				await fs.mkdir(resolvedPath, { recursive: true });
-			} catch (err) {
-				this.ctx.showError(`Failed to create directory: ${err instanceof Error ? err.message : String(err)}`);
-				return;
-			}
 		}
-		if (await this.#withSessionMove(() => this.#relocateSession(resolvedPath))) {
+		const moved = await this.#withSessionMove(async () => {
+			if (!isDirectory) {
+				const confirmed = await this.ctx.showHookConfirm(
+					"Create directory?",
+					`"${path.basename(resolvedPath)}" does not exist. Create it?`,
+				);
+				if (!confirmed) return false;
+				try {
+					await fs.mkdir(resolvedPath, { recursive: true });
+				} catch (err) {
+					this.ctx.showError(`Failed to create directory: ${err instanceof Error ? err.message : String(err)}`);
+					return false;
+				}
+			}
+			return this.#relocateSession(resolvedPath);
+		});
+		if (moved) {
 			this.ctx.present([
 				new Spacer(1),
 				new Text(`${theme.fg("accent", `${theme.status.success} Moved to ${resolvedPath}`)}`, 1, 1),

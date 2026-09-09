@@ -280,18 +280,23 @@ describe("CommandController /move", () => {
 		}
 	});
 
-	it("aborts /move when pending settings flush fails, leaving cwd untouched", async () => {
+	it("does not prompt or create a move target when pending settings flush fails", async () => {
 		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-source-"));
-		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-target-"));
+		const targetDir = path.join(sourceDir, "destination");
 		try {
 			const { ctx, state, withBtwSessionMove } = createMoveContext(sourceDir, async () => {
 				throw new Error("disk full");
 			});
+			ctx.showHookConfirm = vi.fn(async () => true);
+			const mkdir = vi.spyOn(fs, "mkdir");
 			const controller = new CommandController(ctx);
 
 			await controller.handleMoveCommand(targetDir);
 
 			expect(ctx.showError).toHaveBeenCalledWith(expect.stringContaining("disk full"));
+			expect(ctx.showHookConfirm).not.toHaveBeenCalled();
+			expect(mkdir).not.toHaveBeenCalled();
+			expect(await fs.readdir(sourceDir)).toEqual([]);
 			expect(ctx.session.moveSession).not.toHaveBeenCalled();
 			expect(ctx.applyCwdChange).not.toHaveBeenCalled();
 			expect(withBtwSessionMove).not.toHaveBeenCalled();
@@ -300,12 +305,11 @@ describe("CommandController /move", () => {
 			expect(state.cwd).toBe(sourceDir);
 		} finally {
 			await fs.rm(sourceDir, { recursive: true, force: true });
-			await fs.rm(targetDir, { recursive: true, force: true });
 		}
 	});
 
 	it.each(["cancelled picker", "empty path", "missing parent", "declined creation", "streaming"] as const)(
-		"preserves the session and BTW state before migration on %s",
+		"preserves the session and BTW state when /move is cancelled or rejected on %s",
 		async rejection => {
 			const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-source-"));
 			try {
@@ -333,7 +337,12 @@ describe("CommandController /move", () => {
 
 				await controller.handleMoveCommand(targetPath);
 
-				expect(withBtwSessionMove).not.toHaveBeenCalled();
+				if (rejection === "declined creation") {
+					expect(withBtwSessionMove).toHaveBeenCalledTimes(1);
+					expect(await withBtwSessionMove.mock.results[0]?.value).toBe(false);
+				} else {
+					expect(withBtwSessionMove).not.toHaveBeenCalled();
+				}
 				expect(ctx.session.moveSession).not.toHaveBeenCalled();
 				expect(ctx.applyCwdChange).not.toHaveBeenCalled();
 				expect(state.cwd).toBe(sourceDir);
@@ -342,6 +351,134 @@ describe("CommandController /move", () => {
 				expect(ctx.present).not.toHaveBeenCalled();
 				await expect(fs.stat(targetDir)).rejects.toMatchObject({ code: "ENOENT" });
 			} finally {
+				await fs.rm(sourceDir, { recursive: true, force: true });
+			}
+		},
+	);
+
+	it("does not prompt or create a move target when the BTW migration gate refuses", async () => {
+		const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-gate-"));
+		try {
+			const { ctx, state } = createMoveContext(sourceDir);
+			const targetDir = path.join(sourceDir, "destination");
+			ctx.showHookConfirm = vi.fn(async () => true);
+			ctx.withBtwSessionMove = vi.fn(async () => false);
+			const mkdir = vi.spyOn(fs, "mkdir");
+
+			await new CommandController(ctx).handleMoveCommand(targetDir);
+
+			expect(ctx.withBtwSessionMove).toHaveBeenCalledTimes(1);
+			expect(ctx.showHookConfirm).not.toHaveBeenCalled();
+			expect(mkdir).not.toHaveBeenCalled();
+			expect(await fs.readdir(sourceDir)).toEqual([]);
+			expect(ctx.session.moveSession).not.toHaveBeenCalled();
+			expect(ctx.applyCwdChange).not.toHaveBeenCalled();
+			expect(state.cwd).toBe(sourceDir);
+			expect(state.movedTo).toBeUndefined();
+			expect(state.completedBtwVisible).toBe(true);
+			expect(ctx.present).not.toHaveBeenCalled();
+		} finally {
+			await fs.rm(sourceDir, { recursive: true, force: true });
+		}
+	});
+
+	it.each([true, false])(
+		"holds the move gate across creation confirmation and only commits an accepted move (confirmed=%s)",
+		async confirmed => {
+			const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-lifecycle-"));
+			const confirming = Promise.withResolvers<void>();
+			const confirmation = Promise.withResolvers<boolean>();
+			const creating = Promise.withResolvers<void>();
+			const created = Promise.withResolvers<void>();
+			const relocating = Promise.withResolvers<void>();
+			const relocated = Promise.withResolvers<void>();
+			let command: Promise<void> | undefined;
+			try {
+				const { ctx, state } = createMoveContext(sourceDir);
+				const targetDir = path.join(sourceDir, "destination");
+				const sourceFile = path.join(sourceDir, "session.jsonl");
+				const targetFile = path.join(targetDir, "session.jsonl");
+				await Bun.write(sourceFile, "session data\n");
+				let held = false;
+				let commits = 0;
+				ctx.withBtwSessionMove = vi.fn(async operation => {
+					if (held) throw new Error("Nested migration gate");
+					held = true;
+					try {
+						const moved = await operation();
+						if (moved) {
+							commits++;
+							state.completedBtwVisible = false;
+						}
+						return moved;
+					} finally {
+						held = false;
+					}
+				});
+				ctx.showHookConfirm = vi.fn(async () => {
+					confirming.resolve();
+					return confirmation.promise;
+				});
+				const originalMkdir = fs.mkdir;
+				const mkdir = vi.spyOn(fs, "mkdir").mockImplementation(async (directory, options): Promise<undefined> => {
+					creating.resolve();
+					await created.promise;
+					await originalMkdir(directory, options);
+					return undefined;
+				});
+				ctx.session.moveSession = vi.fn(async cwd => {
+					relocating.resolve();
+					await relocated.promise;
+					await fs.rename(sourceFile, targetFile);
+					state.cwd = cwd;
+					state.movedTo = cwd;
+				});
+				command = new CommandController(ctx).handleMoveCommand(targetDir);
+				await confirming.promise;
+				expect(held).toBe(true);
+				expect(commits).toBe(0);
+				expect(state.completedBtwVisible).toBe(true);
+				expect(mkdir).not.toHaveBeenCalled();
+				expect(await fs.readdir(sourceDir)).toEqual(["session.jsonl"]);
+				confirmation.resolve(confirmed);
+				if (confirmed) {
+					await creating.promise;
+					expect(held).toBe(true);
+					expect(commits).toBe(0);
+					expect(ctx.session.moveSession).not.toHaveBeenCalled();
+					created.resolve();
+					await relocating.promise;
+					expect((await fs.stat(targetDir)).isDirectory()).toBe(true);
+					expect(held).toBe(true);
+					expect(commits).toBe(0);
+					expect(state.cwd).toBe(sourceDir);
+					relocated.resolve();
+				}
+				await command;
+
+				expect(held).toBe(false);
+				expect(ctx.withBtwSessionMove).toHaveBeenCalledTimes(1);
+				expect(ctx.showHookConfirm).toHaveBeenCalledTimes(1);
+				expect(mkdir).toHaveBeenCalledTimes(confirmed ? 1 : 0);
+				expect(ctx.session.moveSession).toHaveBeenCalledTimes(confirmed ? 1 : 0);
+				expect(commits).toBe(confirmed ? 1 : 0);
+				expect(state.completedBtwVisible).toBe(!confirmed);
+				expect(state.cwd).toBe(confirmed ? targetDir : sourceDir);
+				if (confirmed) {
+					expect(await Bun.file(targetFile).text()).toBe("session data\n");
+					expect(await Bun.file(sourceFile).exists()).toBe(false);
+					expect(ctx.present).toHaveBeenCalledTimes(1);
+				} else {
+					expect(await Bun.file(sourceFile).text()).toBe("session data\n");
+					expect(await fs.readdir(sourceDir)).toEqual(["session.jsonl"]);
+					expect(ctx.applyCwdChange).not.toHaveBeenCalled();
+					expect(ctx.present).not.toHaveBeenCalled();
+				}
+			} finally {
+				confirmation.resolve(false);
+				created.resolve();
+				relocated.resolve();
+				await command;
 				await fs.rm(sourceDir, { recursive: true, force: true });
 			}
 		},

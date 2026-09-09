@@ -341,6 +341,9 @@ committed in-memory view.
 Migration is non-destructive until the destination has been selected and
 validated. `/move`, `/wt`, and standalone persistent `!cd` refuse relocation while
 a BTW request is starting or running, asking the operator to finish or cancel it explicitly.
+For `/move`, the same gate is acquired before confirming or creating a missing
+destination directory and remains held through relocation. A busy request or
+unsaved checkpoint therefore leaves neither a new directory nor a moved session.
 The `/wt` gate is acquired before creating a branch or checkout and remains held
 through session relocation and configured source cleanup, so a busy refusal does
 not leave an unused worktree.
@@ -358,6 +361,9 @@ available to view and copy. Retrying the operation retries the retained snapshot
 against its original disk revision. Transient I/O failures can recover, but a
 conflict never silently rebases over another writer's changes. An initial
 checkpoint rejection still prevents model dispatch and can reload history normally.
+Visible BTW errors use bounded, single-line text with control sequences removed
+and embedded home paths shortened; original errors remain available in diagnostic
+logs and exception causes for troubleshooting.
 
 Starting a question saves its running state. Completion, error, and explicit
 cancellation save a final checkpoint; cancelled answers retain text already

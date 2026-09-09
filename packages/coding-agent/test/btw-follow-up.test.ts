@@ -9,6 +9,7 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { type BtwHistoryRecord, BtwHistoryStore, getBtwTurns } from "@oh-my-pi/pi-coding-agent/session/btw-history";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { TRUNCATE_LENGTHS } from "@oh-my-pi/pi-coding-agent/tools/render-utils";
 import * as clipboard from "@oh-my-pi/pi-coding-agent/utils/clipboard";
 import { Container, type TUI } from "@oh-my-pi/pi-tui";
 
@@ -185,22 +186,42 @@ describe("BTW follow-up lifecycle", () => {
 		await h.controller.start("Survive a storage error");
 		const failed = Promise.withResolvers<void>();
 		const writeFile = fs.writeFile;
+		const storageError = new Error(
+			`\x1b[2JEACCES: open '${os.homedir()}/blocked directory/btw.json'\r\n\t${"detail ".repeat(100)}`,
+		);
+		const shown = vi.spyOn(h.ctx, "showError");
 		let unavailable = true;
 		vi.spyOn(fs, "writeFile").mockImplementation(async (file, data, options) => {
 			if (unavailable && typeof file === "string" && file.startsWith(h.directory) && file.endsWith(".tmp")) {
 				failed.resolve();
-				throw new Error("Synthetic storage failure");
+				throw storageError;
 			}
 			return writeFile(file, data, options);
 		});
 		try {
 			h.requests.at(-1)!.resolve(answer("Retained answer"));
 			await failed.promise;
-			await expect(h.controller.flush()).rejects.toThrow("Synthetic storage failure");
+			const failure = await h.controller.flush().then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+			if (!(failure instanceof Error)) throw new Error("Expected storage failure to block flushing");
+			expect(failure.cause).toBe(storageError);
+			expect(failure.message).toContain("EACCES");
+			expect(failure.message).toContain("~/blocked directory/btw.json");
+			expect(failure.message).not.toContain(os.homedir());
+			expect(failure.message).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+			expect(Bun.stringWidth(failure.message)).toBeLessThanOrEqual(TRUNCATE_LENGTHS.RECAP);
 			expect((await records(h.manager))[0]?.answer).toBe("");
 			const operation = vi.fn(async () => true);
 			expect(await h.controller.withSessionMove(operation)).toBe(false);
 			expect(operation).not.toHaveBeenCalled();
+			for (const [message] of shown.mock.calls) {
+				expect(message).toContain("EACCES");
+				expect(message).not.toContain(os.homedir());
+				expect(message).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+				expect(Bun.stringWidth(message)).toBeLessThanOrEqual(TRUNCATE_LENGTHS.LINE);
+			}
 			unavailable = false;
 			expect(await h.controller.withSessionMove(operation)).toBe(true);
 			expect(operation).toHaveBeenCalledTimes(1);
@@ -208,6 +229,32 @@ describe("BTW follow-up lifecycle", () => {
 		} finally {
 			unavailable = false;
 			await h.controller.flush();
+		}
+	});
+
+	it("renders safe provider errors inline and from durable history while preserving raw diagnostics", async () => {
+		const h = await harness();
+		await h.controller.start("Provider failure");
+		const error = new Error(`\x1b[2JEACCES: open '${os.homedir()}/private/file'\r\n\t${"detail ".repeat(100)}`);
+		h.requests.at(-1)!.reject(error);
+		await drain();
+		await h.controller.flush();
+
+		const inline = h.ctx.btwContainer.render(160).join("\n");
+		const saved = (await records(h.manager))[0]!;
+		expect(saved.error).toBe(error.message);
+		const overlay = vi.spyOn(h.ctx.ui, "showOverlay");
+		await h.controller.start("");
+		const panel = overlay.mock.calls.at(-1)?.[0];
+		if (!(panel instanceof BtwHistoryPanel)) throw new Error("Expected BTW history");
+		const history = panel.render(160).join("\n");
+		for (const rendered of [inline, history]) {
+			expect(rendered).not.toContain("\x1b[2J");
+			const plain = Bun.stripANSI(rendered);
+			expect(plain).toContain("EACCES");
+			expect(plain).toContain("~/private/file");
+			expect(plain).not.toContain(os.homedir());
+			expect(plain).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
 		}
 	});
 
