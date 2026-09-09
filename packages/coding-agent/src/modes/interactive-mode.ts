@@ -4917,30 +4917,26 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/** Shared `shutdown()`/`restart()` teardown: dispose the session and hand the terminal back. */
 	async #teardown(): Promise<void> {
-		await this.#liveCommandController.stop();
-
-		await this.#btwController.dispose();
-		this.#omfgController.dispose();
-		this.#cleanseController.dispose();
-		this.#focusController.dispose();
-
-		// Surface an explicit "Closing session…" line so the user sees a reason
-		// for the pause while `session.dispose()` flushes memory consolidate and
-		// other cleanups (issue #3641). The await on the next line yields the
-		// event loop, giving requestRender() a tick to paint the status before
-		// dispose blocks.
+		// Surface progress before any asynchronous cleanup, including live commands
+		// and BTW history writes, so the user sees a reason for the pause.
 		this.showStatus("Closing session…");
 
-		// Persist the draft and dispose the session through the shared teardown
-		// so a signal that arrives mid-shutdown cannot fire a second dispose.
-		// The teardown is a promise-memoized singleton; whichever path calls it
-		// first runs the work, the other awaits the same settled promise.
-		// The teardown is registered lazily in `init()` — a `/exit` reached
-		// before `init()` completed falls back to a direct dispose.
 		const stillClosingTimer = setTimeout(() => {
 			this.showStatus("Still closing… (flushing memory backend / network)");
 		}, STILL_CLOSING_DELAY_MS);
 		try {
+			await this.#liveCommandController.stop();
+			await this.#btwController.dispose();
+			this.#omfgController.dispose();
+			this.#cleanseController.dispose();
+			this.#focusController.dispose();
+
+			// Persist the draft and dispose the session through the shared teardown
+			// so a signal that arrives mid-shutdown cannot fire a second dispose.
+			// The teardown is a promise-memoized singleton; whichever path calls it
+			// first runs the work, the other awaits the same settled promise.
+			// The teardown is registered lazily in `init()` — a `/exit` reached
+			// before `init()` completed falls back to a direct dispose.
 			if (this.#signalTeardown) {
 				await this.#signalTeardown();
 			} else {
