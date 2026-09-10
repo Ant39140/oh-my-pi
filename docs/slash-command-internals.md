@@ -358,6 +358,12 @@ or rollback, so a refused command cannot leave the shell in a different director
 Cancelled pickers, invalid destinations, and failed moves retain the BTW conversation.
 Successful relocation clears the old view only after moving the saved artifacts.
 
+Resuming from a path, the session picker, or an imported session cancels BTW and
+waits for its terminal checkpoint before switching. Confirmed deletion of the
+active session uses the same cleanup before detaching and removing its artifacts.
+Failed BTW persistence leaves the source session and its artifacts intact.
+Declining deletion or deleting an inactive session does not cancel the current BTW.
+
 Session operations wait at most 10 seconds for outstanding BTW persistence.
 A timeout stops the operation and leaves the current session in place; it does
 not cancel the underlying filesystem write or allow migration/deletion to run

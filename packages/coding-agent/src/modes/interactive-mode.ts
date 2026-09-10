@@ -5827,7 +5827,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		return true;
 	}
 
-	async #prepareSessionSwitch(): Promise<void> {
+	async prepareSessionSwitch(): Promise<void> {
 		await this.#btwController.dispose();
 		this.#omfgController.dispose();
 		this.#cleanseController.dispose();
@@ -5838,7 +5838,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	async handleClearCommand(): Promise<void> {
 		if (this.#vibeSessionTransitionBlocked()) return;
-		await this.#prepareSessionSwitch();
+		await this.prepareSessionSwitch();
 		await this.#commandController.handleClearCommand();
 	}
 
@@ -5852,7 +5852,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	async handleDropCommand(): Promise<void> {
 		if (this.#vibeSessionTransitionBlocked()) return;
-		await this.#prepareSessionSwitch();
+		await this.prepareSessionSwitch();
 		await this.#commandController.handleDropCommand();
 	}
 
@@ -6096,20 +6096,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async handleResumeSession(sessionPath: string): Promise<void> {
-		// Flush pending settings writes *before* disposing controllers or resetting
-		// observers: a save failure must leave the session, process project dir,
-		// and Settings in the source scope with all UI intact.
-		try {
-			await this.settings.flush();
-		} catch (err) {
-			this.showError(`Failed to save pending settings: ${err instanceof Error ? err.message : String(err)}`);
-			return;
-		}
-		await this.#btwController.dispose();
-		this.#omfgController.dispose();
-		this.#cleanseController.dispose();
-		this.resetObserverRegistry();
-		await this.#selectorController.handleResumeSession(sessionPath, { settingsFlushed: true });
+		await this.#selectorController.handleResumeSession(sessionPath);
 	}
 
 	handleSessionDeleteCommand(): Promise<void> {
