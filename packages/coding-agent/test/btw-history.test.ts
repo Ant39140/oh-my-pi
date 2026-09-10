@@ -297,6 +297,43 @@ describe("BtwHistoryStore", () => {
 		}
 	});
 
+	it.each([
+		["root", "createdAt"],
+		["root", "updatedAt"],
+		["follow-up", "createdAt"],
+		["follow-up", "updatedAt"],
+	] as const)("rejects an out-of-range %s %s before publishing or loading history", async (scope, field) => {
+		const original = record("range");
+		const turn = { question: "Follow-up", answer: "Answer", status: "complete" as const, createdAt: 1, updatedAt: 2 };
+		const invalid =
+			scope === "root"
+				? { ...original, [field]: 8.64e15 + 1 }
+				: { ...original, followUps: [{ ...turn, [field]: 8.64e15 + 1 }] };
+		const store = await BtwHistoryStore.open(artifactsDir);
+		await store.upsert(original);
+		await expect(store.upsert(invalid)).rejects.toThrow("Invalid BTW history record");
+		expect((await BtwHistoryStore.open(artifactsDir)).getRecords()).toEqual([original]);
+
+		const filePath = path.join(artifactsDir, "btw-history", "entry-range.json");
+		const bytes = JSON.stringify(invalid);
+		await Bun.write(filePath, bytes);
+		await expect(BtwHistoryStore.open(artifactsDir)).rejects.toThrow("Invalid BTW history record");
+		expect(await Bun.file(filePath).text()).toBe(bytes);
+	});
+
+	it("preserves the inclusive Date range boundaries across reopen", async () => {
+		const store = await BtwHistoryStore.open(artifactsDir);
+		const saved = record("range", {
+			createdAt: 0,
+			updatedAt: 8.64e15,
+			followUps: [
+				{ question: "Follow-up", answer: "Answer", status: "complete", createdAt: 8.64e15, updatedAt: 8.64e15 },
+			],
+		});
+		await store.upsert(saved);
+		expect((await BtwHistoryStore.open(artifactsDir)).getRecords()).toEqual([saved]);
+	});
+
 	it("rejects traversal ids before creating files or accepting the record", async () => {
 		const store = await BtwHistoryStore.open(artifactsDir);
 		await expect(store.upsert(record("../../outside"))).rejects.toThrow("Invalid BTW history record id");

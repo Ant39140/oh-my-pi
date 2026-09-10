@@ -313,6 +313,9 @@ than a byte-for-byte native provider transcript.
 - In history, `f` or `Enter` opens a native follow-up input for the selected topic.
   Inside the input, `Enter` sends a nonempty question and `Esc` cancels the draft
   and returns to history; `f`, `c`, and `x` are ordinary text.
+  Escape also cancels a submitted follow-up while its startup writes are pending,
+  without starting a model request. If its initial checkpoint was already underway,
+  the turn is saved as cancelled before another follow-up can start.
 - Follow-ups append to the same topic, retain prior answers and cancelled partial
   output, and survive resume. The original question remains the history-list title;
   `Details` shows every question and answer in chronological order.
@@ -337,6 +340,9 @@ another process cannot overwrite a live owner or a stale topic snapshot. A
 conflicting follow-up is rejected before any model request, and reopening or
 retrying reads the latest saved history. Rejected writes never replace the
 committed in-memory view.
+Root and follow-up timestamps must be nonnegative and within JavaScript's supported
+Date range (at most `8.64e15` milliseconds); invalid records are rejected before
+history rendering.
 
 Migration is non-destructive until the destination has been selected and
 validated. `/move`, `/wt`, and standalone persistent `!cd` refuse relocation while

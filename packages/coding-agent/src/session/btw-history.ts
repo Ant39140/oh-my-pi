@@ -42,8 +42,8 @@ const turnFields = {
 	question: "string",
 	answer: "string",
 	status: "'running' | 'complete' | 'cancelled' | 'error' | 'interrupted'",
-	createdAt: "number >= 0",
-	updatedAt: "number >= 0",
+	createdAt: "0 <= number <= 8640000000000000",
+	updatedAt: "0 <= number <= 8640000000000000",
 	"error?": "string",
 } as const;
 const turnSchema = type({ ...turnFields, "+": "reject" });
@@ -62,11 +62,6 @@ function parseRecord(value: unknown): BtwHistoryRecord {
 	}
 	if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(result.id)) {
 		throw new Error("Invalid BTW history record id");
-	}
-	for (const turn of getBtwTurns(result)) {
-		if (!Number.isFinite(turn.createdAt) || !Number.isFinite(turn.updatedAt)) {
-			throw new Error("Invalid BTW history record timestamp");
-		}
 	}
 	return result;
 }

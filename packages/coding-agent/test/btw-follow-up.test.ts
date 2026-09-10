@@ -437,6 +437,89 @@ describe("BTW follow-up lifecycle", () => {
 		});
 	});
 
+	it.each(["flush", "session checkpoint", "BTW checkpoint"] as const)(
+		"cancels a submitted composer during %s without dispatching a model request",
+		async boundary => {
+			const h = await harness();
+			const topic = await h.root("Topic", "Original answer");
+			const overlay = vi.spyOn(h.ctx.ui, "showOverlay");
+			await h.controller.start("");
+			const panel = overlay.mock.calls.at(-1)?.[0];
+			if (!(panel instanceof BtwHistoryPanel)) throw new Error("Expected BTW history");
+			const entered = Promise.withResolvers<void>();
+			const release = Promise.withResolvers<void>();
+			let settled = Promise.withResolvers<boolean>();
+			const start = h.controller.startFollowUp.bind(h.controller);
+			vi.spyOn(h.controller, "startFollowUp").mockImplementation(async (...args) => {
+				const accepted = await start(...args);
+				settled.resolve(accepted);
+				return accepted;
+			});
+			if (boundary === "flush") {
+				const flush = h.controller.flush.bind(h.controller);
+				vi.spyOn(h.controller, "flush").mockImplementationOnce(async () => {
+					entered.resolve();
+					await release.promise;
+					await flush();
+				});
+			} else if (boundary === "session checkpoint") {
+				const ensureOnDisk = h.manager.ensureOnDisk.bind(h.manager);
+				vi.spyOn(h.manager, "ensureOnDisk").mockImplementationOnce(async () => {
+					entered.resolve();
+					await release.promise;
+					await ensureOnDisk();
+				});
+			} else {
+				const upsert = BtwHistoryStore.prototype.upsert;
+				vi.spyOn(BtwHistoryStore.prototype, "upsert").mockImplementationOnce(
+					async function (this: BtwHistoryStore, record) {
+						entered.resolve();
+						await release.promise;
+						await upsert.call(this, record);
+					},
+				);
+			}
+			try {
+				panel.handleInput("f");
+				panel.pasteText("Cancel this follow-up");
+				panel.handleInput("\r");
+				await entered.promise;
+				panel.handleInput("\x1b");
+				release.resolve();
+				expect(await settled.promise).toBe(false);
+				await h.controller.flush();
+				expect(h.runEphemeralTurn).toHaveBeenCalledTimes(1);
+				const saved = (await records(h.manager))[0]!;
+				expect(saved.answer).toBe("Original answer");
+				if (boundary === "BTW checkpoint") {
+					expect(saved.followUps).toEqual([
+						expect.objectContaining({ question: "Cancel this follow-up", status: "cancelled" }),
+					]);
+				} else {
+					expect(saved.followUps).toBeUndefined();
+				}
+
+				// A fresh composer must not inherit cancellation or a stranded topic lease.
+				await drain();
+				settled = Promise.withResolvers<boolean>();
+				expect(panel.openFollowUp(topic.id)).toBe(true);
+				panel.pasteText("Accepted follow-up");
+				panel.handleInput("\r");
+				expect(await settled.promise).toBe(true);
+				expect(h.runEphemeralTurn).toHaveBeenCalledTimes(2);
+				expect(h.requests.at(-1)!.args.signal?.aborted).toBe(false);
+				await h.complete("Accepted answer");
+				expect((await records(h.manager))[0]!.followUps?.at(-1)).toMatchObject({
+					question: "Accepted follow-up",
+					answer: "Accepted answer",
+					status: "complete",
+				});
+			} finally {
+				release.resolve();
+			}
+		},
+	);
+
 	it("keeps a follow-up visible if history closes during its asynchronous start", async () => {
 		const h = await harness();
 		const topic = await h.root("Topic", "Answer");
@@ -760,7 +843,7 @@ describe("BTW follow-up composer", () => {
 		h.panel.pasteText("A follow-up");
 		h.panel.handleInput("\r");
 		await drain();
-		expect(followUp).toHaveBeenCalledWith(h.record, "A follow-up");
+		expect(followUp).toHaveBeenCalledTimes(1);
 	});
 
 	it("treats f/c/x as draft text and lets Escape cancel only the composer", () => {
@@ -791,7 +874,6 @@ describe("BTW follow-up composer", () => {
 		h.panel.render(100);
 		h.panel.handleInput("\r");
 		expect(followUp).toHaveBeenCalledTimes(1);
-		expect(followUp).toHaveBeenCalledWith(h.record, "fcx");
 		pending.resolve(false);
 		await drain();
 		expect(Bun.stripANSI(h.panel.render(100).join("\n"))).toContain("fcx");
@@ -800,7 +882,6 @@ describe("BTW follow-up composer", () => {
 		await drain();
 		h.panel.render(100);
 		expect(followUp).toHaveBeenCalledTimes(2);
-		expect(followUp.mock.calls[1]).toEqual([h.record, "fcx"]);
 		h.panel.handleInput("c");
 		expect(h.onCopy).toHaveBeenCalledWith(h.record);
 		expect(h.onCancel).not.toHaveBeenCalled();

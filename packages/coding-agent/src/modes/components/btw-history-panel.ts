@@ -37,7 +37,7 @@ interface BtwHistoryPanelOptions {
 	onCopy: (record: BtwHistoryRecord) => void;
 	onCancel: (record: BtwHistoryRecord) => void;
 	canFollowUp?: (record: BtwHistoryRecord) => boolean;
-	onFollowUp?: (record: BtwHistoryRecord, question: string) => Promise<boolean>;
+	onFollowUp?: (record: BtwHistoryRecord, question: string, signal: AbortSignal) => Promise<boolean>;
 	requestRender: () => void;
 	getHeight: () => number;
 }
@@ -45,6 +45,7 @@ interface BtwHistoryPanelOptions {
 interface FollowUpComposer {
 	recordId: string;
 	input: Input;
+	abortController: AbortController;
 	notice?: string;
 }
 
@@ -168,8 +169,9 @@ export class BtwHistoryPanel implements Component, Focusable {
 	#openComposer(record: BtwHistoryRecord): void {
 		const input = new Input();
 		input.prompt = theme.fg("accent", "Follow up: ");
-		const composer: FollowUpComposer = { recordId: record.id, input };
+		const composer: FollowUpComposer = { recordId: record.id, input, abortController: new AbortController() };
 		input.onEscape = () => {
+			composer.abortController.abort();
 			this.#composer = undefined;
 		};
 		input.onSubmit = value => {
@@ -196,7 +198,7 @@ export class BtwHistoryPanel implements Component, Focusable {
 		composer.notice = "Starting follow-up…";
 		this.#options.requestRender();
 		try {
-			const accepted = await this.#options.onFollowUp!(record, question);
+			const accepted = await this.#options.onFollowUp!(record, question, composer.abortController.signal);
 			if (this.#composer !== composer) return;
 			if (accepted) {
 				this.#composer = undefined;

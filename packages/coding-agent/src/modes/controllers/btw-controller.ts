@@ -317,12 +317,13 @@ export class BtwController {
 		await this.#start(question);
 	}
 
-	async startFollowUp(recordId: string, question: string): Promise<boolean> {
+	async startFollowUp(recordId: string, question: string, signal?: AbortSignal): Promise<boolean> {
 		if (!question.trim()) return false;
-		return this.#start(question, recordId);
+		return this.#start(question, recordId, signal);
 	}
 
-	async #start(question: string, recordId?: string): Promise<boolean> {
+	async #start(question: string, recordId?: string, signal?: AbortSignal): Promise<boolean> {
+		if (signal?.aborted) return false;
 		const trimmedQuestion = question.trim();
 		if (this.#starting || this.#branchInFlight || this.#transitionCount > 0) {
 			this.ctx.showStatus("A /btw action is in progress. Please wait.", { dim: true });
@@ -345,7 +346,7 @@ export class BtwController {
 			const store = await this.#loadHistory();
 			const generation = this.#generation;
 			const sessionId = this.ctx.sessionManager.getSessionId();
-			if (store !== this.#store || sessionId !== originalSessionId) return false;
+			if (signal?.aborted || store !== this.#store || sessionId !== originalSessionId) return false;
 			if (!trimmedQuestion) {
 				this.#showHistory(store);
 				return true;
@@ -353,6 +354,7 @@ export class BtwController {
 			// A just-cancelled/completed turn may still be publishing its checkpoint.
 			await this.flush();
 			if (
+				signal?.aborted ||
 				generation !== this.#generation ||
 				store !== this.#store ||
 				sessionId !== this.ctx.sessionManager.getSessionId()
@@ -369,7 +371,8 @@ export class BtwController {
 				return false;
 			}
 			await this.ctx.sessionManager.ensureOnDisk();
-			if (generation !== this.#generation || sessionId !== this.ctx.sessionManager.getSessionId()) return false;
+			if (signal?.aborted || generation !== this.#generation || sessionId !== this.ctx.sessionManager.getSessionId())
+				return false;
 			if (!previous) this.#closeHistory();
 			this.#activeRequest?.component.close();
 			this.#clearCompletedState();
@@ -429,6 +432,13 @@ export class BtwController {
 				getBtwLatestTurn(request.record).status !== "running"
 			)
 				return false;
+			if (signal?.aborted) {
+				// The initial checkpoint may already own a topic lease. Finish it as
+				// cancelled before accepting another turn, without dispatching a model.
+				this.handleCancel();
+				await this.flush();
+				return false;
+			}
 			this.#refreshHistory();
 			void this.#runRequest(request);
 			return true;
@@ -463,11 +473,11 @@ export class BtwController {
 				this.#transitionCount === 0 &&
 				getBtwLatestTurn(record).status !== "running" &&
 				(!this.#activeRequest || getBtwLatestTurn(this.#activeRequest.record).status !== "running"),
-			onFollowUp: (record, question) => {
+			onFollowUp: (record, question, signal) => {
 				if (historySessionId !== this.ctx.sessionManager.getSessionId()) {
 					return Promise.resolve(false);
 				}
-				return this.startFollowUp(record.id, question);
+				return this.startFollowUp(record.id, question, signal);
 			},
 			requestRender: () => this.ctx.ui.requestRender(),
 			getHeight: () => this.ctx.ui.terminal.rows,
