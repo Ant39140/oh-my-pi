@@ -20,6 +20,7 @@ import {
 	cerebrasModelManagerOptions,
 	clinePassModelManagerOptions,
 	cloudflareAiGatewayModelManagerOptions,
+	commandCodeModelManagerOptions,
 	coreWeaveModelManagerOptions,
 	deepinfraModelManagerOptions,
 	deepseekModelManagerOptions,
@@ -157,6 +158,15 @@ export const CATALOG_PROVIDERS = [
 		catalogDiscovery: { label: "Cloudflare AI Gateway" },
 	},
 	{
+		id: "commandcode",
+		defaultModel: "claude-sonnet-4-6",
+		envVars: ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"],
+		createModelManagerOptions: (config: ModelManagerConfig) => commandCodeModelManagerOptions(config),
+		allowUnauthenticated: true,
+		dynamicModelsAuthoritative: true,
+		catalogDiscovery: { label: "Command Code", allowUnauthenticated: true },
+	},
+	{
 		id: "cursor",
 		defaultModel: "claude-4.6-opus-high",
 		envVars: ["CURSOR_ACCESS_TOKEN"],
@@ -196,7 +206,7 @@ export const CATALOG_PROVIDERS = [
 	},
 	{
 		id: "firepass",
-		defaultModel: "kimi-k2.6-turbo",
+		defaultModel: "glm-5.2-fast",
 		envVars: ["FIREPASS_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => firepassModelManagerOptions(config),
 	},
