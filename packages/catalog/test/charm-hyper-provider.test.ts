@@ -71,6 +71,27 @@ const HYPER_ROWS: Record<string, unknown>[] = [
 		capabilities: { vision: false },
 		pricing: { input: 1.326, output: 4.22, cache_create: 0, cache_hit: 0.663 },
 	},
+	{
+		// Family `m2` carries a class-wide ladder; a family selector must not
+		// upgrade this blockless row into a reasoning model.
+		id: "minimax-m2.7",
+		object: "model",
+		display_name: "MiniMax M2.7",
+		context_window: 262_100,
+		max_output_tokens: 6553,
+		capabilities: { vision: false },
+		pricing: { input: 0.404, output: 1.496, cache_create: 0, cache_hit: 0.202 },
+	},
+	{
+		// Arrives with the leaked 512K/512K pricing-tier boundary.
+		id: "minimax-m3",
+		object: "model",
+		display_name: "MiniMax M3",
+		context_window: 512_000,
+		max_output_tokens: 512_000,
+		capabilities: { vision: true },
+		pricing: { input: 0.32664, output: 1.30656, cache_create: 0, cache_hit: 0.0642392 },
+	},
 ];
 
 function hyperModelsFetch(): { calls: string[]; authorizations: (string | null)[]; fetch: FetchImpl } {
@@ -154,7 +175,10 @@ describe("Charm Hyper provider support", () => {
 		// so any synthesized rung is a silent no-op, and `ThinkingConfig`
 		// forbids the empty-list shape that would otherwise express "reasons,
 		// no dial".
-		for (const id of ["kimi-k2.5", "glm-5.1"]) {
+		// minimax-m2.7 is family `m2`, which carries a class-wide
+		// `thinking-efforts` ladder — asserting only the boolean would miss a
+		// ladder arriving through that family selector.
+		for (const id of ["kimi-k2.5", "glm-5.1", "minimax-m2.7"]) {
 			const model = models.find(item => item.id === id);
 			expect(model?.thinking, id).toBeUndefined();
 			expect(model?.reasoning, id).toBe(false);
@@ -169,6 +193,16 @@ describe("Charm Hyper provider support", () => {
 		// tokens and stopped naturally, so the published value truncates real
 		// edits. The rule adopts its identically sized sibling's 20275.
 		expect(models.find(model => model.id === "glm-5.1")?.maxTokens).toBe(20_275);
+
+		// MiniMax-M3 arrives with the 512K/512K pricing-tier boundary that
+		// `classes/minimax.kdl` already documents; charm-hyper joins that
+		// rule's host list. Exact selectors are case-sensitive and Hyper
+		// publishes the id lowercase, so this pins the spelling too — the
+		// correction spans a shared class file and fails silently otherwise.
+		expect(models.find(model => model.id === "minimax-m3")).toMatchObject({
+			contextWindow: 1_000_000,
+			maxTokens: 128_000,
+		});
 	});
 
 	test("normalizes a host-only base URL onto the /v1 surface", async () => {

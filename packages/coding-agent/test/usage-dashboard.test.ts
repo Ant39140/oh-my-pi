@@ -123,7 +123,7 @@ describe("buildProviderCards", () => {
 				{
 					id: "charm-hyper:credits",
 					label: "Credit balance",
-					scope: { provider: "charm-hyper", accountId: "a", windowId: "balance" },
+					scope: { provider: "charm-hyper", windowId: "balance", shared: true },
 					amount: { remaining: 100, unit: "credits" },
 				},
 			]),
@@ -133,6 +133,30 @@ describe("buildProviderCards", () => {
 		expect(cards[0].windows[0].fraction).toBeUndefined();
 		// Untouched providers collapse into a tick; a live balance must not.
 		expect(cards[0].idle).toBe(false);
+	});
+
+	it("collapses an account-wide balance reported once per key, whatever the order", () => {
+		// AuthStorage probes every stored key, so a two-key Charm Hyper account
+		// yields two identical shared rows. Neither key may be dropped (the
+		// card used to show whichever sorted first) nor added twice.
+		const balance = (remaining: number) => ({
+			id: "charm-hyper:credits",
+			label: "Credit balance",
+			scope: { provider: "charm-hyper" as const, windowId: "balance", shared: true },
+			amount: { remaining, unit: "credits" as const },
+		});
+		const cards = buildProviderCards(
+			[report("charm-hyper", "a@x.test", [balance(100)]), report("charm-hyper", "b@x.test", [balance(100)])],
+			now,
+		);
+		expect(cards[0].windows[0].usedText).toBe("100 credits left");
+
+		// Order must not change the number: both keys observe one pool.
+		const reversed = buildProviderCards(
+			[report("charm-hyper", "b@x.test", [balance(100)]), report("charm-hyper", "a@x.test", [balance(100)])],
+			now,
+		);
+		expect(reversed[0].windows[0].usedText).toBe("100 credits left");
 	});
 });
 describe("UsageDashboardComponent", () => {

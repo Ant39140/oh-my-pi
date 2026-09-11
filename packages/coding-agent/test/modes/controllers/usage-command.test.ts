@@ -96,27 +96,31 @@ describe("renderUsageReports content", () => {
 		expect(output).toContain(`expired (${expiredIso.slice(0, 10)})`);
 	});
 
-	it("pools prepaid credit balances instead of reporting an account count", () => {
-		// A remaining-only limit has no total to divide by, so the aggregate used
-		// to fall through to "2 accts" and the balance never reached the user.
+	it("shows one prepaid balance for a provider whose keys share an account pool", () => {
+		// Production shape: `fetchCharmHyperUsage` emits no accountId and marks
+		// the limit shared, because Hyper's balance is account-wide — spending
+		// through one key moves every key's reported balance. AuthStorage still
+		// probes once per stored key, so two keys yield two identical rows.
+		// Summing them would claim 200 credits the account never had.
 		const now = Date.now();
-		const account = (accountId: string, remaining: number): UsageReport => ({
+		const keyReport = (remaining: number): UsageReport => ({
 			provider: "charm-hyper",
 			fetchedAt: now,
-			metadata: { email: `${accountId}@example.com` },
 			limits: [
 				{
 					id: "charm-hyper:credits",
 					label: "Credit balance",
-					scope: { provider: "charm-hyper", accountId, windowId: "balance" },
+					scope: { provider: "charm-hyper", windowId: "balance", shared: true },
 					amount: { remaining, unit: "credits" },
 				},
 			],
 		});
 
-		const reports = [account("a", 100), account("b", 99.978)];
-		const output = stripVTControlCharacters(renderUsageReports(reports, theme, now, 98));
-		expect(output).toContain("199.98 credits left");
+		const output = stripVTControlCharacters(renderUsageReports([keyReport(100), keyReport(100)], theme, now, 98));
+		expect(output).toContain("100 credits left");
+		expect(output).not.toContain("200 credits left");
+		// The balance must reach the user at all: a remaining-only limit used
+		// to fall through to a bare account count.
 		expect(output).not.toContain("accts");
 	});
 });

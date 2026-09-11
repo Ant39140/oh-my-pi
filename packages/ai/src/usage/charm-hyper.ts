@@ -1,8 +1,10 @@
-import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
+import { ProviderHttpError } from "../error";
 import type { UsageFetchContext, UsageFetchParams, UsageLimit, UsageProvider, UsageReport } from "../usage";
+import { isRecord } from "../utils";
 
 const PROVIDER = "charm-hyper";
-const CREDITS_URL = "https://hyper.charm.land/v1/credits";
+const DEFAULT_BASE_URL = "https://hyper.charm.land/v1";
+const CREDITS_PATH = "/credits";
 
 /**
  * Charm Hyper sells prepaid credits: `/v1/credits` answers `{"balance": N}` and
@@ -10,15 +12,28 @@ const CREDITS_URL = "https://hyper.charm.land/v1/credits";
  * is remaining-only by construction. Synthesizing a total from the first
  * observed balance would misreport every later top-up, so we report only what
  * the API states.
+ *
+ * The balance is **account-wide**, not per-key: spending 1.216 credits through
+ * one key dropped a second key's reported balance from 95 to 94 (verified
+ * 2026-09-11), and Hyper issues several keys per account. The endpoint exposes
+ * no account identity to group them by, so the limit is marked
+ * `scope.shared` — every credential reports the same pool, and consumers must
+ * collapse rather than sum it.
  */
 async function fetchCharmHyperUsage(params: UsageFetchParams, ctx: UsageFetchContext): Promise<UsageReport | null> {
 	if (params.provider !== PROVIDER) return null;
 	const credential = params.credential;
 	if (credential.type !== "api_key" || !credential.apiKey) return null;
 
-	let payload: unknown = null;
+	// Honor a configured proxy base: inference and discovery already route
+	// through it, and sending the stored key to the canonical host would both
+	// fail for a proxy-scoped credential and disclose it off-site.
+	const baseUrl = (params.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+	const creditsUrl = `${baseUrl}${CREDITS_PATH}`;
+
+	let payload: unknown;
 	try {
-		const response = await ctx.fetch(CREDITS_URL, {
+		const response = await ctx.fetch(creditsUrl, {
 			headers: {
 				Authorization: `Bearer ${credential.apiKey}`,
 				Accept: "application/json",
@@ -26,6 +41,15 @@ async function fetchCharmHyperUsage(params: UsageFetchParams, ctx: UsageFetchCon
 			signal: params.signal,
 		});
 		if (!response.ok) {
+			// A revoked key must invalidate the cached balance rather than let
+			// the last-good report be re-served: only a thrown auth status
+			// purges it, while `null` is the transient-failure path.
+			if (response.status === 401 || response.status === 403) {
+				throw new ProviderHttpError(
+					`Charm Hyper credits endpoint returned ${response.status} ${response.statusText}`.trim(),
+					response.status,
+				);
+			}
 			ctx.logger?.warn("Charm Hyper usage fetch failed", {
 				status: response.status,
 				statusText: response.statusText,
@@ -34,6 +58,7 @@ async function fetchCharmHyperUsage(params: UsageFetchParams, ctx: UsageFetchCon
 		}
 		payload = await response.json();
 	} catch (error) {
+		if (error instanceof ProviderHttpError) throw error;
 		ctx.logger?.warn("Charm Hyper usage fetch error", { error: String(error) });
 		return null;
 	}
@@ -45,9 +70,10 @@ async function fetchCharmHyperUsage(params: UsageFetchParams, ctx: UsageFetchCon
 	const limit: UsageLimit = {
 		id: "charm-hyper:credits",
 		label: "Credit balance",
-		// Windowless bucket key, so multiple keys group into one row and the
-		// report's window suffix stays quiet (the label already says "balance").
-		scope: { provider: params.provider, windowId: "balance" },
+		// Windowless and shared: the label already says "balance", and the
+		// shared flag tells renderers this is one account-level pool seen once
+		// per stored key.
+		scope: { provider: params.provider, windowId: "balance", shared: true },
 		amount: { remaining: balance, unit: "credits" },
 	};
 
@@ -55,7 +81,7 @@ async function fetchCharmHyperUsage(params: UsageFetchParams, ctx: UsageFetchCon
 		provider: params.provider,
 		fetchedAt: Date.now(),
 		limits: [limit],
-		metadata: { endpoint: CREDITS_URL },
+		metadata: { endpoint: creditsUrl },
 		raw: payload,
 	};
 }

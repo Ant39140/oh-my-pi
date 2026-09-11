@@ -42,16 +42,50 @@ describe("charm hyper usage provider", () => {
 		expect(report!.limits).toHaveLength(1);
 		const limit = report!.limits[0]!;
 		expect(limit.amount).toEqual({ remaining: 100, unit: "credits" });
+		// Account-wide: spending through one key moves every key's balance, so
+		// renderers must collapse the duplicates rather than sum them.
+		expect(limit.scope.shared).toBe(true);
 		expect(limit.window).toBeUndefined();
 		expect(resolveUsedFraction(limit)).toBeUndefined();
 	});
 
+	it("sends the balance probe to a configured proxy instead of the canonical host", async () => {
+		// Inference and discovery honor `baseUrl`; probing hyper.charm.land
+		// anyway would fail for a proxy-scoped key and disclose it off-site.
+		const seen: SeenRequest = {};
+		await charmHyperUsageProvider.fetchUsage(
+			{
+				provider: "charm-hyper",
+				credential: makeCredential(),
+				baseUrl: "https://gateway.internal/v1/",
+				signal: undefined,
+			},
+			makeCtx(`{"balance": 100}`, 200, seen),
+		);
+		expect(seen.url).toBe("https://gateway.internal/v1/credits");
+	});
+
+	it("throws on a revoked key so the cached balance is purged", async () => {
+		// `validatesCredentials: true` means only a thrown auth status evicts
+		// the last-good report; returning null would re-serve a stale balance
+		// indefinitely after the key stopped working.
+		for (const status of [401, 403]) {
+			await expect(
+				charmHyperUsageProvider.fetchUsage(
+					{ provider: "charm-hyper", credential: makeCredential(), signal: undefined },
+					makeCtx(`{"error":"authentication failed"}`, status),
+				),
+			).rejects.toMatchObject({ status });
+		}
+	});
+
 	it("returns null rather than a zero balance when the response cannot be trusted", async () => {
-		// Each row is a different way the endpoint can fail; every one of them
-		// must read as "no data", never as an account that ran out of credits.
+		// Each row is a different way the endpoint can fail transiently; every
+		// one must read as "no data", never as an account out of credits, and
+		// never as a revoked key (which would wrongly evict a good report).
 		const cases: [name: string, body: string, status: number][] = [
-			["auth failure", `{"error":"authentication failed"}`, 401],
 			["server error", `{"balance": 100}`, 500],
+			["rate limited", `{"error":"slow down"}`, 429],
 			["unparseable body", "not-json{{{", 200],
 			["balance absent", `{}`, 200],
 			["balance not a number", `{"balance":"100"}`, 200],

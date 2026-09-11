@@ -20,6 +20,7 @@ import { colorLuma, formatDuration, hexToRgb, rgbToHex, sanitizeText } from "@oh
 import { formatProviderName } from "../../slash-commands/helpers/format";
 import { colorToAnsi } from "../theme/color";
 import { theme } from "../theme/theme";
+import { formatAbsoluteOnlyAmount } from "../usage-amounts";
 import {
 	matchesSelectCancel,
 	matchesSelectDown,
@@ -68,56 +69,6 @@ function formatLimitTitle(limit: UsageLimit): string {
 		return `${limit.label} (${tier})`;
 	}
 	return limit.label;
-}
-
-function isUsedOnlyAbsoluteAmount(limit: UsageLimit): boolean {
-	const amount = limit.amount;
-	return (
-		amount.unit !== "percent" &&
-		amount.unit !== "unknown" &&
-		amount.used !== undefined &&
-		Number.isFinite(amount.used) &&
-		amount.limit === undefined &&
-		amount.remaining === undefined &&
-		resolveUsedFraction(limit) === undefined
-	);
-}
-
-function formatUsedOnlyAmount(limit: UsageLimit): string {
-	const used = limit.amount.used ?? 0;
-	if (limit.amount.unit === "usd") return `$${used.toFixed(2)} used`;
-	const formatted = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(used);
-	return `${formatted} ${limit.amount.unit} used`;
-}
-
-function isRemainingOnlyAbsoluteAmount(limit: UsageLimit): boolean {
-	const amount = limit.amount;
-	return (
-		amount.unit !== "percent" &&
-		amount.unit !== "unknown" &&
-		amount.remaining !== undefined &&
-		Number.isFinite(amount.remaining) &&
-		amount.limit === undefined &&
-		amount.used === undefined &&
-		resolveUsedFraction(limit) === undefined
-	);
-}
-
-function formatRemainingOnlyAmount(limit: UsageLimit): string {
-	const left = limit.amount.remaining ?? 0;
-	if (limit.amount.unit === "usd") return `$${left.toFixed(2)} left`;
-	const formatted = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(left);
-	return `${formatted} ${limit.amount.unit} left`;
-}
-
-/**
- * Text for a bucket the bar can't draw: providers report either spend-to-date
- * or a prepaid balance, and neither carries a total to fill a bar with.
- */
-function formatAbsoluteOnlyAmount(limit: UsageLimit): string | undefined {
-	if (isUsedOnlyAbsoluteAmount(limit)) return formatUsedOnlyAmount(limit);
-	if (isRemainingOnlyAbsoluteAmount(limit)) return formatRemainingOnlyAmount(limit);
-	return undefined;
 }
 
 /**
@@ -208,7 +159,7 @@ export function buildProviderCards(reports: UsageReport[], nowMs: number): Provi
 				fraction,
 				status: aggregateStatus(bucket.limits),
 				resetMs: resetsAt !== undefined && resetsAt > nowMs ? resetsAt - nowMs : undefined,
-				usedText: fraction === undefined ? formatAbsoluteOnlyAmount(worst) : undefined,
+				usedText: fraction === undefined ? formatAbsoluteOnlyAmount(bucket.limits) : undefined,
 			};
 		});
 		windows.sort((a, b) => (b.fraction ?? -1) - (a.fraction ?? -1));
