@@ -4,7 +4,7 @@
 
 ### Added
 
-- Charm Hyper accounts now report their remaining prepaid credit balance in `/usage`.
+- Charm Hyper accounts now report their remaining prepaid credit balance in `/usage` ([#11656](https://github.com/can1357/oh-my-pi/pull/11656) by [@oldschoola](https://github.com/oldschoola)).
 
 ## [18.1.17] - 2026-09-10
 
