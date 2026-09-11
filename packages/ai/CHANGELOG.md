@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Charm Hyper accounts now report their remaining prepaid credit balance in `/usage`.
+
 ## [18.1.17] - 2026-09-10
 
 ### Fixed

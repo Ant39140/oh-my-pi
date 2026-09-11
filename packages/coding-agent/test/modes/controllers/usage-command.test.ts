@@ -95,4 +95,28 @@ describe("renderUsageReports content", () => {
 		expect(output).toContain(`(${futureIso.slice(0, 10)})`);
 		expect(output).toContain(`expired (${expiredIso.slice(0, 10)})`);
 	});
+
+	it("pools prepaid credit balances instead of reporting an account count", () => {
+		// A remaining-only limit has no total to divide by, so the aggregate used
+		// to fall through to "2 accts" and the balance never reached the user.
+		const now = Date.now();
+		const account = (accountId: string, remaining: number): UsageReport => ({
+			provider: "charm-hyper",
+			fetchedAt: now,
+			metadata: { email: `${accountId}@example.com` },
+			limits: [
+				{
+					id: "charm-hyper:credits",
+					label: "Credit balance",
+					scope: { provider: "charm-hyper", accountId, windowId: "balance" },
+					amount: { remaining, unit: "credits" },
+				},
+			],
+		});
+
+		const reports = [account("a", 100), account("b", 99.978)];
+		const output = stripVTControlCharacters(renderUsageReports(reports, theme, now, 98));
+		expect(output).toContain("199.98 credits left");
+		expect(output).not.toContain("accts");
+	});
 });

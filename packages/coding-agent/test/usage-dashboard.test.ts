@@ -114,6 +114,26 @@ describe("buildProviderCards", () => {
 		const unlimited = cards.find(card => card.provider === "ollama-cloud");
 		expect(unlimited?.unlimited).toBe(true);
 	});
+
+	it("shows a prepaid balance on the card instead of falling back to no data", () => {
+		// Balance-only limits carry no fraction, so the card used to render the
+		// literal "no data" for providers that sell prepaid credits.
+		const reports = [
+			report("charm-hyper", "a@x.test", [
+				{
+					id: "charm-hyper:credits",
+					label: "Credit balance",
+					scope: { provider: "charm-hyper", accountId: "a", windowId: "balance" },
+					amount: { remaining: 100, unit: "credits" },
+				},
+			]),
+		];
+		const cards = buildProviderCards(reports, now);
+		expect(cards[0].windows[0].usedText).toBe("100 credits left");
+		expect(cards[0].windows[0].fraction).toBeUndefined();
+		// Untouched providers collapse into a tick; a live balance must not.
+		expect(cards[0].idle).toBe(false);
+	});
 });
 describe("UsageDashboardComponent", () => {
 	beforeAll(async () => {

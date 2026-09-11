@@ -13,6 +13,7 @@
 		"auth/baseten.kdl",
 		"auth/bedrock-mantle.kdl",
 		"auth/cerebras.kdl",
+		"auth/charm-hyper.kdl",
 		"auth/cline-pass.kdl",
 		"auth/cloudflare-ai-gateway.kdl",
 		"auth/commandcode.kdl",
@@ -114,6 +115,7 @@
 		"providers/baseten.kdl",
 		"providers/bedrock-mantle.kdl",
 		"providers/cerebras.kdl",
+		"providers/charm-hyper.kdl",
 		"providers/cline-pass.kdl",
 		"providers/cloudflare-ai-gateway.kdl",
 		"providers/commandcode.kdl",
@@ -7517,6 +7519,71 @@
 				},
 				"thinking": {
 					"mode": "effort"
+				}
+			},
+			{
+				"source": "providers/charm-hyper.kdl:43",
+				"providers": [
+					"charm-hyper"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "glm-5"
+					},
+					{
+						"kind": "exact",
+						"value": "glm-5.1"
+					},
+					{
+						"kind": "exact",
+						"value": "kimi-k2-thinking"
+					},
+					{
+						"kind": "exact",
+						"value": "minimax-m2.7"
+					}
+				],
+				"wire": {
+					"supportsReasoningEffort": false
+				},
+				"thinking": {
+					"efforts": [
+						"high"
+					]
+				}
+			},
+			{
+				"source": "providers/charm-hyper.kdl:56",
+				"providers": [
+					"charm-hyper"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "glm-5.1"
+					}
+				],
+				"catalog": {
+					"limitsPatch": {
+						"maxTokens": 20275
+					}
+				}
+			},
+			{
+				"source": "providers/charm-hyper.kdl:7",
+				"providers": [
+					"charm-hyper"
+				],
+				"wire": {
+					"supportsDeveloperRole": false,
+					"supportsStore": false,
+					"maxTokensField": "max_tokens",
+					"reasoningContentField": "reasoning_content"
+				},
+				"thinking": {
+					"mode": "effort",
+					"upgradeNeutral": true
 				}
 			},
 			{
@@ -18208,6 +18275,30 @@
 					"instructions": "Create or copy a Provider API key from Command Code Studio",
 					"prompt": "Paste your Command Code API key",
 					"placeholder": "user_..."
+				}
+			},
+			{
+				"id": "charm-hyper",
+				"apiKeyFormat": "bearer",
+				"name": "Charm Hyper",
+				"env": {
+					"vars": [
+						"CHARM_HYPER_API_KEY",
+						"HYPER_API_KEY"
+					]
+				},
+				"login": {
+					"kind": "api-key",
+					"authUrl": "https://hyper.charm.land/",
+					"instructions": "Create or copy an API key from the Charm Hyper dashboard",
+					"prompt": "Paste your Charm Hyper API key",
+					"placeholder": "sk-hyper-...",
+					"normalize": "strip-bearer",
+					"validate": {
+						"kind": "models-endpoint",
+						"label": "Charm Hyper",
+						"url": "https://hyper.charm.land/v1/credits"
+					}
 				}
 			},
 			{

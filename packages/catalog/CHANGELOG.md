@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Charm Hyper as a built-in provider with API-key login, live model discovery, and per-model pricing, effort ladders, and limits read straight from its catalog.
+
 ## [18.1.17] - 2026-09-10
 
 ### Added

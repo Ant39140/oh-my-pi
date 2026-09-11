@@ -1898,6 +1898,19 @@ function isUsedOnlyAbsoluteAmount(limit: UsageLimit): boolean {
 	);
 }
 
+function isRemainingOnlyAbsoluteAmount(limit: UsageLimit): boolean {
+	const amount = limit.amount;
+	return (
+		amount.unit !== "percent" &&
+		amount.unit !== "unknown" &&
+		amount.remaining !== undefined &&
+		Number.isFinite(amount.remaining) &&
+		amount.limit === undefined &&
+		amount.used === undefined &&
+		resolveUsedFraction(limit) === undefined
+	);
+}
+
 function resolveAggregateStatus(limits: UsageLimit[]): AggregateDisplayStatus {
 	const hasOk = limits.some(limit => limit.status === "ok");
 	const hasWarning = limits.some(limit => limit.status === "warning");
@@ -1933,6 +1946,16 @@ function formatAggregateAmount(limits: UsageLimit[]): string {
 	}
 
 	if (limits.length > 0 && limits.every(isUsedOnlyAbsoluteAmount)) return "";
+
+	// Prepaid balances have no total to divide by: pool the headroom across
+	// accounts instead, matching the `/usage` report's "… left" phrasing.
+	if (limits.length > 0 && limits.every(isRemainingOnlyAbsoluteAmount)) {
+		const unit = limits[0]!.amount.unit;
+		if (limits.every(limit => limit.amount.unit === unit)) {
+			const remaining = limits.reduce((sum, limit) => sum + (limit.amount.remaining ?? 0), 0);
+			return unit === "usd" ? `$${remaining.toFixed(2)} left` : `${formatNumber(remaining, 2)} ${unit} left`;
+		}
+	}
 
 	// Count unique accounts from limit scopes — not limits.length.
 	const uniqueAccountIds = new Set(

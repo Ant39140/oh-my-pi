@@ -44,7 +44,7 @@ export interface CardWindowRow {
 	status: UsageLimit["status"];
 	/** Reset countdown of the worst account, ms from now, when in the future. */
 	resetMs?: number;
-	/** Absolute used amount (e.g. `$12.34 used`) for limits without a fraction. */
+	/** Absolute one-sided amount (e.g. `$12.34 used`, `100 credits left`) for limits without a fraction. */
 	usedText?: string;
 }
 
@@ -88,6 +88,36 @@ function formatUsedOnlyAmount(limit: UsageLimit): string {
 	if (limit.amount.unit === "usd") return `$${used.toFixed(2)} used`;
 	const formatted = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(used);
 	return `${formatted} ${limit.amount.unit} used`;
+}
+
+function isRemainingOnlyAbsoluteAmount(limit: UsageLimit): boolean {
+	const amount = limit.amount;
+	return (
+		amount.unit !== "percent" &&
+		amount.unit !== "unknown" &&
+		amount.remaining !== undefined &&
+		Number.isFinite(amount.remaining) &&
+		amount.limit === undefined &&
+		amount.used === undefined &&
+		resolveUsedFraction(limit) === undefined
+	);
+}
+
+function formatRemainingOnlyAmount(limit: UsageLimit): string {
+	const left = limit.amount.remaining ?? 0;
+	if (limit.amount.unit === "usd") return `$${left.toFixed(2)} left`;
+	const formatted = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(left);
+	return `${formatted} ${limit.amount.unit} left`;
+}
+
+/**
+ * Text for a bucket the bar can't draw: providers report either spend-to-date
+ * or a prepaid balance, and neither carries a total to fill a bar with.
+ */
+function formatAbsoluteOnlyAmount(limit: UsageLimit): string | undefined {
+	if (isUsedOnlyAbsoluteAmount(limit)) return formatUsedOnlyAmount(limit);
+	if (isRemainingOnlyAbsoluteAmount(limit)) return formatRemainingOnlyAmount(limit);
+	return undefined;
 }
 
 /**
@@ -178,8 +208,7 @@ export function buildProviderCards(reports: UsageReport[], nowMs: number): Provi
 				fraction,
 				status: aggregateStatus(bucket.limits),
 				resetMs: resetsAt !== undefined && resetsAt > nowMs ? resetsAt - nowMs : undefined,
-				usedText:
-					fraction === undefined && isUsedOnlyAbsoluteAmount(worst) ? formatUsedOnlyAmount(worst) : undefined,
+				usedText: fraction === undefined ? formatAbsoluteOnlyAmount(worst) : undefined,
 			};
 		});
 		windows.sort((a, b) => (b.fraction ?? -1) - (a.fraction ?? -1));

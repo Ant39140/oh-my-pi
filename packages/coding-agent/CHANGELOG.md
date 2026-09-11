@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/usage` now shows prepaid credit balances (e.g. Charm Hyper's `100 credits left`) on the provider cards and account summaries instead of `no data`.
+
 ## [18.1.17] - 2026-09-10
 
 ### Added
