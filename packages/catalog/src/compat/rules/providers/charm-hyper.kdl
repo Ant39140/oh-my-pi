@@ -2,12 +2,17 @@
 //
 // Capability data is NOT restated here: `GET /v1/models` publishes each row's
 // context window, output cap, vision flag, effort vocabulary and per-million
-// tariff, and `charmHyperModelManagerOptions` maps all of it verbatim. Only
-// facts the gateway does not publish belong in this file.
+// tariff, and `charmHyperModelManagerOptions` maps all of it verbatim —
+// including `reasoningDisableMode`, which is derived per model from whether
+// the advertised vocabulary contains `none`. Only facts the gateway does not
+// publish, or publishes wrongly, belong in this file.
 provider "charm-hyper" {
-	// OpenAI-dialect gateway in front of open-weight and third-party models:
-	// the `developer` role and `store` are first-party OpenAI conveniences the
-	// upstream engines do not implement, and the wire takes `max_tokens`.
+	// OpenAI-dialect gateway in front of open-weight and third-party models.
+	// `developer` and `store` are accepted (HTTP 200) but the gateway accepts
+	// every unknown field it is handed, so acceptance is not evidence the
+	// semantics are honored; both stay off and system prompts ride the
+	// `system` role, matching every sibling gateway. The wire takes
+	// `max_tokens` (verified 2026-09-11).
 	supports-developer-role #false
 	supports-store #false
 	max-tokens-field "max_tokens"
@@ -15,44 +20,46 @@ provider "charm-hyper" {
 	// Reasoning arrives as `reasoning_content` on both the streamed delta and
 	// the final message (verified 2026-09-11).
 	reasoning-content-field "reasoning_content"
-	// Per-model ladders come from the live `effort_levels` vocabulary, so the
-	// discovery row already decides which models take the dial. Rows the
-	// gateway leaves silent get no dial unless a rule below grants one.
-	thinking-upgrade-neutral #true
 	// ---------------------------------------------------------------------------
-	// Residue: always-on reasoners.
+	// Blockless rows are left non-reasoning on purpose.
 	//
-	// These four serve a thinking model but publish no `reasoning` block, so
-	// discovery cannot see the capability. Verified live on 2026-09-11 by
-	// counting `usage.completion_tokens_details.reasoning_tokens` on a prompt
-	// that requires multi-step work: glm-5 387, glm-5.1 401, kimi-k2-thinking
-	// 222, minimax-m2.7 568, each with `reasoning_content` populated. Every
-	// other blockless row (gemma-4-26b-a4b-it, kimi-k2.5, kimi-k2.7-code,
-	// llama-3.3-70b-instruct, llama-4-maverick-17b-128e-instruct-fp8,
+	// Four ids serve a thinking model while publishing no `reasoning` block:
+	// glm-5, glm-5.1, kimi-k2-thinking and minimax-m2.7 each returned
+	// populated `reasoning_content` and non-zero `reasoning_tokens` on a
+	// multi-step prompt (2026-09-11). The other blockless rows
+	// (gemma-4-26b-a4b-it, kimi-k2.5, kimi-k2.7-code, llama-3.3-70b-instruct,
+	// llama-4-maverick-17b-128e-instruct-fp8,
 	// qwen3-coder-480b-a35b-instruct-int4-mixed-ar, qwen3-next-80b-a3b-instruct)
-	// returned zero reasoning tokens and is correctly left alone.
+	// returned none.
 	//
-	// The single nominal tier is what marks them as reasoning models (an exact
-	// `thinking-efforts` selector upgrades a neutral target); `high` is the
-	// gateway's own `default_effort_level` for every row that does publish a
-	// ladder. Re-measuring effort sensitivity on these ids produced
-	// non-monotonic token counts, i.e. sampling noise rather than a hidden
-	// dial, so `supports-reasoning-effort` stays off and no `reasoning_effort`
-	// is ever sent for them.
+	// No rule restores them, because none can be written honestly. Those four
+	// expose no effort dial, and `ThinkingConfig.efforts` is documented as
+	// never empty — a reasoning model without a controllable surface carries
+	// `thinking: undefined`, which no KDL axis can express (the only upgrade
+	// path is an exact `thinking-efforts` ladder). Synthesizing a ladder would
+	// add silent no-op rungs: the gateway answers 200 to efforts it never
+	// advertised and simply ignores them, and a repeat measurement of effort
+	// sensitivity on these ids came back non-monotonic, i.e. sampling noise
+	// rather than a hidden dial.
+	//
+	// The cost is narrow and was checked: streamed `reasoning_content` is
+	// parsed and displayed with no `model.reasoning` gate, the effort
+	// parameter is moot without a dial, and the developer-role and
+	// zai-replay paths are already disabled for this provider.
 	// ---------------------------------------------------------------------------
-	models "glm-5" "glm-5.1" "kimi-k2-thinking" "minimax-m2.7" {
-		supports-reasoning-effort #false
-		thinking-efforts "high"
-	}
-	// Residue: misreported output cap. glm-5.1 publishes
-	// `max_output_tokens: 3276`, which is not a real ceiling — a single
-	// completion produced 14066 tokens and still stopped on `finish_reason:
-	// "stop"` rather than `length` (measured 2026-09-11). Its identically
-	// sized sibling glm-5 (202752-token window) publishes 20275, the 10% the
-	// gateway derives everywhere else, so 3276 is an upstream slip. Adopting
-	// the sibling's value keeps long edits from truncating while staying
-	// under the measured capability. Every other row's published cap is left
-	// untouched.
+	// Residue: misreported output cap. The gateway derives most
+	// `max_output_tokens` values as a flat 10% or 2.5% of the context window
+	// rather than reporting a real ceiling, and they are advisory: glm-5.1
+	// publishes 3276 yet produced 14066 tokens, and minimax-m2.7 publishes
+	// 6553 yet produced 8418, both stopping on `finish_reason: "stop"` rather
+	// than `length` (measured 2026-09-11).
+	//
+	// Only glm-5.1 is corrected, because only it can be corrected to a
+	// grounded number: at 1.6% of its window it is the one value low enough
+	// to truncate ordinary edits, and its identically sized sibling glm-5
+	// (202752-token window) publishes 20275 — the 10% the gateway derives
+	// everywhere else — which also clears the measured 14066. No ceiling is
+	// invented for minimax-m2.7, whose true maximum is unknown above 8418.
 	models "glm-5.1" {
 		limits-patch {
 			max-tokens 20275

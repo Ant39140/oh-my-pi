@@ -5934,9 +5934,10 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:32",
+				"source": "classes/minimax.kdl:34",
 				"class": "minimax",
 				"providers": [
+					"charm-hyper",
 					"minimax",
 					"minimax-cn",
 					"minimax-code",
@@ -5946,6 +5947,10 @@
 					{
 						"kind": "exact",
 						"value": "MiniMax-M3"
+					},
+					{
+						"kind": "exact",
+						"value": "minimax-m3"
 					}
 				],
 				"catalog": {
@@ -5956,7 +5961,7 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:39",
+				"source": "classes/minimax.kdl:41",
 				"class": "minimax",
 				"providers": [
 					"alibaba-coding-plan",
@@ -5969,7 +5974,7 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:44",
+				"source": "classes/minimax.kdl:46",
 				"class": "minimax",
 				"providers": [
 					"amazon-bedrock",
@@ -5986,7 +5991,7 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:48",
+				"source": "classes/minimax.kdl:50",
 				"class": "minimax",
 				"providers": [
 					"kilo",
@@ -6004,7 +6009,7 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:54",
+				"source": "classes/minimax.kdl:56",
 				"class": "minimax",
 				"providers": [
 					"minimax",
@@ -6021,7 +6026,7 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:62",
+				"source": "classes/minimax.kdl:64",
 				"class": "minimax",
 				"providers": [
 					"minimax",
@@ -6043,7 +6048,7 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:52",
+				"source": "classes/minimax.kdl:54",
 				"class": "minimax",
 				"providers": [
 					"minimax",
@@ -6055,7 +6060,7 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:72",
+				"source": "classes/minimax.kdl:74",
 				"class": "minimax",
 				"providers": [
 					"minimax-code",
@@ -6067,7 +6072,7 @@
 				}
 			},
 			{
-				"source": "classes/minimax.kdl:76",
+				"source": "classes/minimax.kdl:78",
 				"class": "minimax",
 				"providers": [
 					"minimax-code",
@@ -7522,39 +7527,7 @@
 				}
 			},
 			{
-				"source": "providers/charm-hyper.kdl:43",
-				"providers": [
-					"charm-hyper"
-				],
-				"models": [
-					{
-						"kind": "exact",
-						"value": "glm-5"
-					},
-					{
-						"kind": "exact",
-						"value": "glm-5.1"
-					},
-					{
-						"kind": "exact",
-						"value": "kimi-k2-thinking"
-					},
-					{
-						"kind": "exact",
-						"value": "minimax-m2.7"
-					}
-				],
-				"wire": {
-					"supportsReasoningEffort": false
-				},
-				"thinking": {
-					"efforts": [
-						"high"
-					]
-				}
-			},
-			{
-				"source": "providers/charm-hyper.kdl:56",
+				"source": "providers/charm-hyper.kdl:63",
 				"providers": [
 					"charm-hyper"
 				],
@@ -7571,7 +7544,7 @@
 				}
 			},
 			{
-				"source": "providers/charm-hyper.kdl:7",
+				"source": "providers/charm-hyper.kdl:9",
 				"providers": [
 					"charm-hyper"
 				],
@@ -7582,8 +7555,7 @@
 					"reasoningContentField": "reasoning_content"
 				},
 				"thinking": {
-					"mode": "effort",
-					"upgradeNeutral": true
+					"mode": "effort"
 				}
 			},
 			{

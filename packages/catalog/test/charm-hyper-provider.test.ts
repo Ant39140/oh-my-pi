@@ -143,23 +143,32 @@ describe("Charm Hyper provider support", () => {
 		expect(withoutOff?.compat.reasoningDisableMode).not.toBe("none-effort");
 	});
 
-	test("trusts the gateway's silence about reasoning except where a rule corrects it", async () => {
+	test("never fabricates an effort ladder for a row the gateway leaves blockless", async () => {
 		const { fetch } = hyperModelsFetch();
 		const models = await discover(fetch);
 
 		// Kimi K2.5 is served non-thinking here even though its upstream home
-		// lists it as a reasoning model, so a blockless row stays non-reasoning.
-		const nonThinking = models.find(model => model.id === "kimi-k2.5");
-		expect(nonThinking?.reasoning).toBe(false);
-		expect(nonThinking?.thinking).toBeUndefined();
+		// lists it as a reasoning model. GLM-5.1 is the opposite: blockless but
+		// verified to emit reasoning tokens. Neither may grow a ladder — the
+		// gateway answers 200 to efforts it never advertised and ignores them,
+		// so any synthesized rung is a silent no-op, and `ThinkingConfig`
+		// forbids the empty-list shape that would otherwise express "reasons,
+		// no dial".
+		for (const id of ["kimi-k2.5", "glm-5.1"]) {
+			const model = models.find(item => item.id === id);
+			expect(model?.thinking, id).toBeUndefined();
+			expect(model?.reasoning, id).toBe(false);
+		}
+	});
 
-		// GLM-5.1 is equally blockless but verified to emit reasoning tokens;
-		// the exact-id rule upgrades it without inventing an effort dial, and
-		// corrects the 3276 output cap the gateway misreports.
-		const alwaysOn = models.find(model => model.id === "glm-5.1");
-		expect(alwaysOn?.reasoning).toBe(true);
-		expect(alwaysOn?.compat.supportsReasoningEffort).toBe(false);
-		expect(alwaysOn?.maxTokens).toBe(20_275);
+	test("corrects an output cap the gateway misreports", async () => {
+		const { fetch } = hyperModelsFetch();
+		const models = await discover(fetch);
+
+		// GLM-5.1 publishes 3276 — 1.6% of its window — yet produced 14066
+		// tokens and stopped naturally, so the published value truncates real
+		// edits. The rule adopts its identically sized sibling's 20275.
+		expect(models.find(model => model.id === "glm-5.1")?.maxTokens).toBe(20_275);
 	});
 
 	test("normalizes a host-only base URL onto the /v1 surface", async () => {
