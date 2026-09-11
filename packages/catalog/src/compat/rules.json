@@ -7527,7 +7527,7 @@
 				}
 			},
 			{
-				"source": "providers/charm-hyper.kdl:63",
+				"source": "providers/charm-hyper.kdl:72",
 				"providers": [
 					"charm-hyper"
 				],
@@ -7540,6 +7540,23 @@
 				"catalog": {
 					"limitsPatch": {
 						"maxTokens": 20275
+					}
+				}
+			},
+			{
+				"source": "providers/charm-hyper.kdl:77",
+				"providers": [
+					"charm-hyper"
+				],
+				"models": [
+					{
+						"kind": "exact",
+						"value": "minimax-m2.7"
+					}
+				],
+				"catalog": {
+					"limitsPatch": {
+						"maxTokens": 26214
 					}
 				}
 			},

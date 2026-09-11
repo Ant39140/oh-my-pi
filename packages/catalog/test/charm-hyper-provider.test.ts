@@ -189,10 +189,15 @@ describe("Charm Hyper provider support", () => {
 		const { fetch } = hyperModelsFetch();
 		const models = await discover(fetch);
 
-		// GLM-5.1 publishes 3276 — 1.6% of its window — yet produced 14066
-		// tokens and stopped naturally, so the published value truncates real
-		// edits. The rule adopts its identically sized sibling's 20275.
+		// Both rows publish a fraction of their window rather than a real
+		// ceiling, and both were measured producing more than they advertise.
+		// Each correction adopts a same-window peer's published value.
+		// GLM-5.1 publishes 3276 (1.6%) but produced 14066; sibling glm-5
+		// publishes 20275.
 		expect(models.find(model => model.id === "glm-5.1")?.maxTokens).toBe(20_275);
+		// MiniMax M2.7 publishes 6553 (2.5%) but produced 8418; the three
+		// other ~262K rows all publish 26214.
+		expect(models.find(model => model.id === "minimax-m2.7")?.maxTokens).toBe(26_214);
 
 		// MiniMax-M3 arrives with the 512K/512K pricing-tier boundary that
 		// `classes/minimax.kdl` already documents; charm-hyper joins that
