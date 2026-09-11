@@ -27,8 +27,11 @@ async function fetchCharmHyperUsage(params: UsageFetchParams, ctx: UsageFetchCon
 
 	// Honor a configured proxy base: inference and discovery already route
 	// through it, and sending the stored key to the canonical host would both
-	// fail for a proxy-scoped credential and disclose it off-site.
-	const baseUrl = (params.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+	// fail for a proxy-scoped credential and disclose it off-site. The default
+	// base carries a `/v1` segment, so a host-only override gains one — the
+	// same normalization `charmHyperModelManagerOptions` applies to discovery.
+	const trimmed = (params.baseUrl ?? DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
+	const baseUrl = trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
 	const creditsUrl = `${baseUrl}${CREDITS_PATH}`;
 
 	let payload: unknown;

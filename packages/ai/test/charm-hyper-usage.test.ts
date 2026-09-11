@@ -52,17 +52,21 @@ describe("charm hyper usage provider", () => {
 	it("sends the balance probe to a configured proxy instead of the canonical host", async () => {
 		// Inference and discovery honor `baseUrl`; probing hyper.charm.land
 		// anyway would fail for a proxy-scoped key and disclose it off-site.
-		const seen: SeenRequest = {};
-		await charmHyperUsageProvider.fetchUsage(
-			{
-				provider: "charm-hyper",
-				credential: makeCredential(),
-				baseUrl: "https://gateway.internal/v1/",
-				signal: undefined,
-			},
-			makeCtx(`{"balance": 100}`, 200, seen),
-		);
-		expect(seen.url).toBe("https://gateway.internal/v1/credits");
+		// A host-only override must still land on `/v1/credits`: the default
+		// base carries the version segment, so dropping it would 404.
+		const cases: [name: string, baseUrl: string][] = [
+			["versioned", "https://gateway.internal/v1/"],
+			["host only", "https://gateway.internal"],
+			["host with slash", "https://gateway.internal/"],
+		];
+		for (const [name, baseUrl] of cases) {
+			const seen: SeenRequest = {};
+			await charmHyperUsageProvider.fetchUsage(
+				{ provider: "charm-hyper", credential: makeCredential(), baseUrl, signal: undefined },
+				makeCtx(`{"balance": 100}`, 200, seen),
+			);
+			expect(seen.url, name).toBe("https://gateway.internal/v1/credits");
+		}
 	});
 
 	it("throws on a revoked key so the cached balance is purged", async () => {

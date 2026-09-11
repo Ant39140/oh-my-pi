@@ -137,25 +137,28 @@ describe("buildProviderCards", () => {
 
 	it("collapses an account-wide balance reported once per key, whatever the order", () => {
 		// AuthStorage probes every stored key, so a two-key Charm Hyper account
-		// yields two identical shared rows. Neither key may be dropped (the
-		// card used to show whichever sorted first) nor added twice.
+		// yields two shared rows for one pool. The two probes fire moments
+		// apart against a moving balance, so they rarely agree exactly — the
+		// values differ here deliberately, or reversing them would prove
+		// nothing and a first-wins implementation would still pass.
 		const balance = (remaining: number) => ({
 			id: "charm-hyper:credits",
 			label: "Credit balance",
 			scope: { provider: "charm-hyper" as const, windowId: "balance", shared: true },
 			amount: { remaining, unit: "credits" as const },
 		});
-		const cards = buildProviderCards(
-			[report("charm-hyper", "a@x.test", [balance(100)]), report("charm-hyper", "b@x.test", [balance(100)])],
+		const forward = buildProviderCards(
+			[report("charm-hyper", "a@x.test", [balance(100)]), report("charm-hyper", "b@x.test", [balance(95)])],
 			now,
 		);
-		expect(cards[0].windows[0].usedText).toBe("100 credits left");
-
-		// Order must not change the number: both keys observe one pool.
 		const reversed = buildProviderCards(
-			[report("charm-hyper", "b@x.test", [balance(100)]), report("charm-hyper", "a@x.test", [balance(100)])],
+			[report("charm-hyper", "b@x.test", [balance(95)]), report("charm-hyper", "a@x.test", [balance(100)])],
 			now,
 		);
+
+		// One pool, so never the 195 a sum would claim, and never dependent on
+		// which credential happened to be probed first.
+		expect(forward[0].windows[0].usedText).toBe("100 credits left");
 		expect(reversed[0].windows[0].usedText).toBe("100 credits left");
 	});
 });
