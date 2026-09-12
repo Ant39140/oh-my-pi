@@ -164,7 +164,12 @@ export const CATALOG_PROVIDERS = [
 		// upstream homes list as reasoning/vision), so foreign backfills would
 		// advertise capabilities this deployment does not have.
 		skipCrossProviderReferenceFills: true,
-		catalogDiscovery: { label: "Charm Hyper", allowUnauthenticated: true },
+		// Deliberately NO `catalogDiscovery`: that field is what enrolls a provider
+		// in generate-models.ts. This gateway's catalog is live deployment truth,
+		// so generating would freeze one hyper.charm.land snapshot into
+		// models.json — and since discovery here needs no credentials, it would
+		// happen on every regen, contradicting the runtime-only contract
+		// compat-conformance.test.ts pins for this provider.
 	},
 	{
 		id: "cloudflare-ai-gateway",

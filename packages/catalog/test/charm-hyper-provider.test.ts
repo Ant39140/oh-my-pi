@@ -3,7 +3,7 @@ import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { resolveModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
+import { isCatalogDescriptor, resolveModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { charmHyperModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
@@ -219,14 +219,21 @@ describe("Charm Hyper provider support", () => {
 		expect(authorizations).toEqual(["Bearer sk-hyper-test"]);
 	});
 
-	test("registers discovery, defaults, and both API key environment names", () => {
-		expect(PROVIDER_DESCRIPTORS.find(item => item.providerId === "charm-hyper")).toMatchObject({
+	test("registers discovery and defaults without enrolling in catalog generation", () => {
+		const descriptor = PROVIDER_DESCRIPTORS.find(item => item.providerId === "charm-hyper");
+		expect(descriptor).toMatchObject({
 			defaultModel: "glm-5.3",
 			allowUnauthenticated: true,
 			dynamicModelsAuthoritative: true,
 			skipCrossProviderReferenceFills: true,
-			catalogDiscovery: { label: "Charm Hyper", allowUnauthenticated: true },
 		});
+		// The absence of `catalogDiscovery` is the contract, not an oversight: that
+		// field is what enrolls a provider in generate-models.ts. This gateway's
+		// catalog is live deployment truth, and discovery here needs no
+		// credentials, so enrolling it would freeze one hyper.charm.land snapshot
+		// into models.json on every regen — contradicting the runtime-only set
+		// that compat-conformance.test.ts pins for this provider.
+		expect(isCatalogDescriptor(descriptor!)).toBe(false);
 		expect(DEFAULT_MODEL_PER_PROVIDER["charm-hyper"]).toBe("glm-5.3");
 
 		delete Bun.env.CHARM_HYPER_API_KEY;
@@ -275,7 +282,13 @@ describe("Charm Hyper provider support", () => {
 		// one. They must agree, or the authoritative cache discovery writes is
 		// never read back.
 		const canonical = resolveModelCacheProviderId("charm-hyper", {});
-		const viaManager = charmHyperModelManagerOptions({ baseUrl: "https://proxy.example" }).cacheProviderId;
+		// Keyed on the discovery side, keyless on the registry side: that asymmetry
+		// is the real production shape, so this goes red if a credential ever
+		// re-enters the namespace on one path only.
+		const viaManager = charmHyperModelManagerOptions({
+			baseUrl: "https://proxy.example",
+			apiKey: "sk-hyper-test",
+		}).cacheProviderId;
 
 		expect(viaManager).toBe(resolveModelCacheProviderId("charm-hyper", { baseUrl: "https://proxy.example" }));
 		expect(viaManager).toBe(resolveModelCacheProviderId("charm-hyper", { baseUrl: "https://proxy.example/v1/" }));
