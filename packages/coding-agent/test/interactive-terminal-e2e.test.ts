@@ -284,13 +284,12 @@ describe("libkitty end-to-end", () => {
 		term = new VirtualTerminal(120, 10);
 		const composer = new Composer({ terminal: term });
 		mode = new InteractiveMode(session, "test", undefined, () => {}, undefined, undefined, undefined, composer);
-		mode.keybindings.setUserBindings({ "app.tools.toggleVisibility": "alt+o" });
 		await mode.init({ suppressWelcomeIntro: true });
 		void mode.getUserInput();
 		await term.waitForRender();
 
-		// The test uses the same configurable Alt+O binding as the reported failure.
-
+		mode.keybindings.setUserBindings({ "app.tools.toggleVisibility": "alt+o" });
+		mode.editor.setActionKeys("app.tools.toggleVisibility", mode.keybindings.getKeys("app.tools.toggleVisibility"));
 		mode.renderSessionContext({
 			messages: [
 				toolCall,
