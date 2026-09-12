@@ -1379,4 +1379,22 @@ describe("ModelRegistry runtime provider registration", () => {
 			warn.mockRestore();
 		}
 	});
+
+	test("resolves a configured provider base URL before any model is discovered", () => {
+		// `omp usage` constructs a registry and probes credentials immediately, so
+		// a discovery-only provider (no bundled rows) has no model to read a URL
+		// from yet. Deriving solely from discovered models returned `undefined`
+		// here, and the usage probe then sent a proxy-scoped key to the
+		// provider's canonical host.
+		const providerName = "charm-hyper";
+		fs.writeFileSync(
+			modelsJsonPath,
+			JSON.stringify({ providers: { [providerName]: { baseUrl: "https://gateway.internal" } } }),
+		);
+		const configured = new ModelRegistry(authStorage, modelsJsonPath, { fetch: offlineFetch });
+
+		// Cache-cold by construction: this provider bundles no rows.
+		expect(configured.getAll().some(model => model.provider === providerName)).toBe(false);
+		expect(configured.getProviderBaseUrl(providerName)).toBe("https://gateway.internal");
+	});
 });

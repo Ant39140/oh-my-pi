@@ -28,6 +28,7 @@ import { type GeneratedProvider, getBundledModels } from "../models";
 import type { Api, FetchImpl, Model, ModelSpec, OpenAICompat, Provider, ThinkingConfig, TokenCost } from "../types";
 import { discoveryFetch, isAnthropicOAuthToken, isRecord, toBoolean, toNumber, toPositiveNumber } from "../utils";
 import { ALIBABA_TOKEN_PLAN_BASE_URL, parseAlibabaTokenPlanCredential } from "../wire/alibaba-token-plan";
+import { normalizeCharmHyperBaseUrl } from "../wire/charm-hyper";
 import { CLINEPASS_API_BASE_URL, clinePassClientHeaders } from "../wire/cline-pass";
 import { CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL } from "../wire/cloudflare-ai-gateway";
 import { coreWeaveProjectHeaders } from "../wire/coreweave";
@@ -7391,8 +7392,6 @@ export function commandCodeModelManagerOptions(config?: CommandCodeModelManagerC
 // Charm Hyper
 // ---------------------------------------------------------------------------
 
-const CHARM_HYPER_BASE_URL = getDefaultModelDiscoveryBaseUrl("charm-hyper")!;
-
 /**
  * Configuration for the Charm Hyper model manager.
  *
@@ -7489,8 +7488,7 @@ function resolveCharmHyperCost(pricing: unknown): ModelSpec<"openai-completions"
 export function charmHyperModelManagerOptions(
 	config?: CharmHyperModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
-	const trimmed = config?.baseUrl?.trim().replace(/\/+$/, "");
-	const baseUrl = trimmed ? (trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`) : CHARM_HYPER_BASE_URL;
+	const baseUrl = normalizeCharmHyperBaseUrl(config?.baseUrl);
 	return {
 		providerId: "charm-hyper",
 		cacheProviderId: resolveModelCacheProviderId("charm-hyper", { baseUrl }),

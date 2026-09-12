@@ -3,6 +3,7 @@ import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { normalizeCharmHyperBaseUrl } from "@oh-my-pi/pi-catalog/wire/charm-hyper";
 import { isCatalogDescriptor, resolveModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { charmHyperModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
@@ -217,6 +218,21 @@ describe("Charm Hyper provider support", () => {
 
 		expect(calls).toEqual(["https://gateway.example.com/v1/models"]);
 		expect(authorizations).toEqual(["Bearer sk-hyper-test"]);
+	});
+
+	test("treats a blank configured base URL as absent across every consumer", async () => {
+		// A whitespace-only override used to diverge: the model manager read it as
+		// absent and used the canonical host, while the usage probe and the cache
+		// resolver each produced a bare `/v1`. Inference, balance checks and the
+		// cache namespace then pointed at three different endpoints.
+		const { calls, fetch } = hyperModelsFetch();
+		await discover(fetch, "   ");
+
+		expect(calls).toEqual(["https://hyper.charm.land/v1/models"]);
+		expect(normalizeCharmHyperBaseUrl("   ")).toBe("https://hyper.charm.land/v1");
+		expect(resolveModelCacheProviderId("charm-hyper", { baseUrl: "   " })).toBe(
+			resolveModelCacheProviderId("charm-hyper", {}),
+		);
 	});
 
 	test("registers discovery and defaults without enrolling in catalog generation", () => {

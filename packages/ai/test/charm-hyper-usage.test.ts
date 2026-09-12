@@ -54,18 +54,23 @@ describe("charm hyper usage provider", () => {
 		// anyway would fail for a proxy-scoped key and disclose it off-site.
 		// A host-only override must still land on `/v1/credits`: the default
 		// base carries the version segment, so dropping it would 404.
-		const cases: [name: string, baseUrl: string][] = [
-			["versioned", "https://gateway.internal/v1/"],
-			["host only", "https://gateway.internal"],
-			["host with slash", "https://gateway.internal/"],
+		const cases: [name: string, baseUrl: string | undefined, expected: string][] = [
+			["versioned", "https://gateway.internal/v1/", "https://gateway.internal/v1/credits"],
+			["host only", "https://gateway.internal", "https://gateway.internal/v1/credits"],
+			["host with slash", "https://gateway.internal/", "https://gateway.internal/v1/credits"],
+			// Blank means "not configured", so it must reach the canonical host like
+			// discovery and the cache namespace do. Emitting a bare `/v1` here would
+			// split the balance probe off from every other consumer.
+			["blank", "   ", "https://hyper.charm.land/v1/credits"],
+			["unset", undefined, "https://hyper.charm.land/v1/credits"],
 		];
-		for (const [name, baseUrl] of cases) {
+		for (const [name, baseUrl, expected] of cases) {
 			const seen: SeenRequest = {};
 			await charmHyperUsageProvider.fetchUsage(
 				{ provider: "charm-hyper", credential: makeCredential(), baseUrl, signal: undefined },
 				makeCtx(`{"balance": 100}`, 200, seen),
 			);
-			expect(seen.url, name).toBe("https://gateway.internal/v1/credits");
+			expect(seen.url, name).toBe(expected);
 		}
 	});
 

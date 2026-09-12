@@ -1,3 +1,4 @@
+import { CHARM_HYPER_API_BASE_URL, normalizeCharmHyperBaseUrl } from "../wire/charm-hyper";
 import { PERSONAL_GITHUB_COPILOT_BASE_URL } from "../wire/github-copilot";
 
 export interface ModelCacheProviderIdOptions {
@@ -20,7 +21,7 @@ export function isCredentialScopedModelCacheProvider(providerId: string): boolea
 export function getDefaultModelDiscoveryBaseUrl(providerId: string): string | undefined {
 	switch (providerId) {
 		case "charm-hyper":
-			return "https://hyper.charm.land/v1";
+			return CHARM_HYPER_API_BASE_URL;
 		case "meta":
 		case "muse-code":
 			return "https://api.meta.ai/v1";
@@ -76,13 +77,10 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 			// namespace with no credential at all, so hashing one would split it
 			// against the namespace discovery computes and miss forever.
 			//
-			// The registry also passes the raw configured value while
-			// `charmHyperModelManagerOptions` passes a `/v1`-suffixed one, so the
-			// normalization lives here to keep `host` and `host/v1` on one namespace.
-			const configured = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
-			const trimmedBaseUrl = configured.trim().replace(/\/+$/, "");
-			const discoveryBaseUrl = trimmedBaseUrl.endsWith("/v1") ? trimmedBaseUrl : `${trimmedBaseUrl}/v1`;
-			return `charm-hyper:models-v1:${Bun.hash(discoveryBaseUrl).toString(36)}`;
+			// Normalized through the shared helper because the registry passes the
+			// raw configured value while `charmHyperModelManagerOptions` passes a
+			// `/v1`-suffixed one; both must land on one namespace.
+			return `charm-hyper:models-v1:${Bun.hash(normalizeCharmHyperBaseUrl(options.baseUrl)).toString(36)}`;
 		}
 		case "muse-code": {
 			const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
