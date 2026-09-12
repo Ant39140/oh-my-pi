@@ -983,7 +983,7 @@ exit 64
 			});
 			calls.push(overlapping);
 			// A serialized call cannot finish until the owner is explicitly released.
-			await pollUntil(() => overlappingSettled, deadline);
+			await pollUntil(() => overlappingSettled, Date.now() + 4000);
 			expect(overlappingSettled).toBe(true);
 			const overlappingResult = await overlapping;
 			expect(overlappingResult.exitCode).toBe(0);
