@@ -1397,4 +1397,32 @@ describe("ModelRegistry runtime provider registration", () => {
 		expect(configured.getAll().some(model => model.provider === providerName)).toBe(false);
 		expect(configured.getProviderBaseUrl(providerName)).toBe("https://gateway.internal");
 	});
+
+	test("prefers a configured provider base URL over a model-level one", () => {
+		// The other half of the precedence contract, and the half a green suite
+		// cannot prove: every other `getProviderBaseUrl` caller in these tests
+		// stubs the method. `getProviderHeaders` is documented as provider-level
+		// "without including per-model overrides", so a provider-scoped accessor
+		// must not answer with some model's own baseUrl.
+		const providerName = "charm-hyper";
+		fs.writeFileSync(
+			modelsJsonPath,
+			JSON.stringify({
+				providers: {
+					[providerName]: {
+						baseUrl: "https://gateway.internal",
+						api: "openai-completions",
+						auth: "none",
+						models: [{ ...baseModel, id: "glm-5.3", baseUrl: "https://model-level.example/v1" }],
+					},
+				},
+			}),
+		);
+		const configured = new ModelRegistry(authStorage, modelsJsonPath, { fetch: offlineFetch });
+
+		// The model really does carry a different baseUrl, so this is a genuine
+		// conflict rather than a vacuous assertion.
+		expect(configured.find(providerName, "glm-5.3")?.baseUrl).toBe("https://model-level.example/v1");
+		expect(configured.getProviderBaseUrl(providerName)).toBe("https://gateway.internal");
+	});
 });
