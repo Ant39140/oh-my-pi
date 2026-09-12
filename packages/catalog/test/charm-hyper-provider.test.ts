@@ -3,6 +3,7 @@ import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { resolveModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { charmHyperModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
@@ -266,5 +267,36 @@ describe("Charm Hyper provider support", () => {
 		await expect(
 			login?.({ onAuth: vi.fn(), onPrompt: async () => "sk-hyper-bogus", fetch: unauthorizedFetch }),
 		).rejects.toThrow();
+	});
+
+	test("scopes the model cache to the configured endpoint across both call paths", () => {
+		// `ModelRegistry` resolves this namespace from the raw configured value
+		// while `charmHyperModelManagerOptions` resolves it from a `/v1`-suffixed
+		// one. They must agree, or the authoritative cache discovery writes is
+		// never read back.
+		const canonical = resolveModelCacheProviderId("charm-hyper", {});
+		const viaManager = charmHyperModelManagerOptions({ baseUrl: "https://proxy.example" }).cacheProviderId;
+
+		expect(viaManager).toBe(resolveModelCacheProviderId("charm-hyper", { baseUrl: "https://proxy.example" }));
+		expect(viaManager).toBe(resolveModelCacheProviderId("charm-hyper", { baseUrl: "https://proxy.example/v1/" }));
+		// A self-hosted proxy publishes its own roster, capabilities and tariffs,
+		// so it must not read the canonical host's cache.
+		expect(viaManager).not.toBe(canonical);
+		// An unconfigured manager still shares the default endpoint's namespace.
+		expect(charmHyperModelManagerOptions().cacheProviderId).toBe(canonical);
+	});
+
+	test("keeps the cache namespace independent of the credential", () => {
+		// charm-hyper is absent from CREDENTIAL_SCOPED_MODEL_CACHE_PROVIDERS, so
+		// `ModelRegistry` resolves this namespace with no credential while a
+		// configured manager may hold one. Folding a key into the scope would split
+		// the two apart and permanently miss the cache discovery writes. Asserted
+		// on the resolver itself: the manager forwards no key, so routing through
+		// it could not observe a regression here.
+		const base = { baseUrl: "https://hyper.charm.land/v1" } as const;
+		const withKey = resolveModelCacheProviderId("charm-hyper", { ...base, apiKey: "sk-hyper-a" });
+
+		expect(withKey).toBe(resolveModelCacheProviderId("charm-hyper", { ...base, apiKey: "sk-hyper-b" }));
+		expect(withKey).toBe(resolveModelCacheProviderId("charm-hyper", base));
 	});
 });

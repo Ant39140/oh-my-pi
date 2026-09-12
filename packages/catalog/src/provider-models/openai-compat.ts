@@ -7391,7 +7391,7 @@ export function commandCodeModelManagerOptions(config?: CommandCodeModelManagerC
 // Charm Hyper
 // ---------------------------------------------------------------------------
 
-const CHARM_HYPER_BASE_URL = "https://hyper.charm.land/v1";
+const CHARM_HYPER_BASE_URL = getDefaultModelDiscoveryBaseUrl("charm-hyper")!;
 
 /**
  * Configuration for the Charm Hyper model manager.
@@ -7493,7 +7493,7 @@ export function charmHyperModelManagerOptions(
 	const baseUrl = trimmed ? (trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`) : CHARM_HYPER_BASE_URL;
 	return {
 		providerId: "charm-hyper",
-		cacheProviderId: resolveModelCacheProviderId("charm-hyper", { apiKey: config?.apiKey, baseUrl }),
+		cacheProviderId: resolveModelCacheProviderId("charm-hyper", { baseUrl }),
 		dynamicModelsAuthoritative: true,
 		fetchDynamicModels: () =>
 			fetchOpenAICompatibleModels({
