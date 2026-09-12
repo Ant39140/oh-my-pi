@@ -363,6 +363,10 @@ waits for its terminal checkpoint before switching. Confirmed deletion of the
 active session uses the same cleanup before detaching and removing its artifacts.
 Failed BTW persistence leaves the source session and its artifacts intact.
 Declining deletion or deleting an inactive session does not cancel the current BTW.
+Extension commands using `context.newSession`, `context.switchSession`, or
+`context.branch` also run this cleanup before changing session state or clearing
+extension UI. This applies both when extensions initialize and when their command
+context is reinitialized.
 
 Session operations wait at most 10 seconds for outstanding BTW persistence.
 A timeout stops the operation and leaves the current session in place; it does

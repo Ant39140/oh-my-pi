@@ -4,8 +4,11 @@ import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { ExtensionRuntime } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
+import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { SessionSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/session-selector";
 import { BtwController } from "@oh-my-pi/pi-coding-agent/modes/controllers/btw-controller";
+import { ExtensionUiController } from "@oh-my-pi/pi-coding-agent/modes/controllers/extension-ui-controller";
 import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -42,7 +45,7 @@ interface SideTurn {
 	resolve: (result: { replyText: string; assistantMessage: AssistantMessage }) => void;
 }
 
-describe("BTW session selection and deletion", () => {
+describe("BTW session boundaries", () => {
 	let directory: TempDir;
 	let auth: AuthStorage;
 	let mode: InteractiveMode;
@@ -54,6 +57,7 @@ describe("BTW session selection and deletion", () => {
 	let recordPath: string;
 	let originalRecord: string;
 	let turns: SideTurn[];
+	let extensionRunner: ExtensionRunner;
 
 	beforeAll(() => initTheme());
 	beforeEach(async () => {
@@ -67,11 +71,13 @@ describe("BTW session selection and deletion", () => {
 		manager = SessionManager.create(directory.path(), directory.path());
 		manager.appendMessage({ role: "user", content: "Source session", timestamp: Date.now() });
 		await manager.ensureOnDisk();
+		extensionRunner = new ExtensionRunner([], new ExtensionRuntime(), directory.path(), manager, registry);
 		session = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),
 			sessionManager: manager,
 			settings: Settings.isolated(),
 			modelRegistry: registry,
+			extensionRunner,
 			rebuildSystemPrompt: async () => ({ systemPrompt: ["Test"] }),
 		});
 		mode = new InteractiveMode(session, "test");
@@ -270,5 +276,63 @@ describe("BTW session selection and deletion", () => {
 		expect(manager.getSessionId()).toBe(sourceId);
 		expect(turns[0]!.signal?.aborted).toBe(false);
 		expect(await Bun.file(recordPath).text()).toBe(originalRecord);
+	});
+
+	describe.each(["initial", "reinitialized"] as const)("%s extension command context", binding => {
+		async function transition(action: "newSession" | "switchSession" | "branch") {
+			const controller = new ExtensionUiController(mode);
+			await controller.initHooksAndCustomTools();
+			if (binding === "reinitialized") controller.initializeHookRunner(extensionRunner.getUIContext(), true);
+			const context = extensionRunner.createCommandContext();
+			const target = action === "switchSession" ? await targetSession() : manager.getLeafId()!;
+			return () => {
+				if (action === "newSession") return context.newSession();
+				if (action === "switchSession") return context.switchSession(target);
+				return context.branch(target);
+			};
+		}
+
+		it.each(["newSession", "switchSession", "branch"] as const)(
+			"%s settles BTW before switching and ignores the old request's late answer",
+			async action => {
+				const run = await transition(action);
+				expect(await run()).toEqual({ cancelled: false });
+				expect(manager.getSessionId()).not.toBe(sourceId);
+				expect(turns[0]!.signal?.aborted).toBe(true);
+				const saved = await Bun.file(recordPath).text();
+				expect(JSON.parse(saved).status).toBe("cancelled");
+				turns[0]!.resolve(answer("Late answer from the old session"));
+				await Promise.resolve();
+				await btw.flush();
+				expect(await Bun.file(recordPath).text()).toBe(saved);
+				await mode.handleBtwCommand("Side question in the destination");
+				expect(turns).toHaveLength(2);
+				turns[1]!.resolve(answer("Destination answer"));
+				await Promise.resolve();
+				await btw.flush();
+				expect(
+					(await BtwHistoryStore.open(manager.getArtifactsDir() ?? undefined))
+						.getRecords()
+						.find(record => record.question === "Side question in the destination")?.answer,
+				).toBe("Destination answer");
+			},
+		);
+
+		it.each(["newSession", "switchSession", "branch"] as const)(
+			"%s leaves the source session intact when the BTW checkpoint cannot be saved",
+			async action => {
+				const run = await transition(action);
+				const corrupt = "{invalid checkpoint";
+				await Bun.write(recordPath, corrupt);
+				try {
+					await expect(run()).rejects.toThrow("BTW history could not be saved");
+					expect(manager.getSessionId()).toBe(sourceId);
+					expect(await Bun.file(sourceFile).exists()).toBe(true);
+					expect(await Bun.file(recordPath).text()).toBe(corrupt);
+				} finally {
+					await Bun.write(recordPath, originalRecord);
+				}
+			},
+		);
 	});
 });
